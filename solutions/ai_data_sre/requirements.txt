@@ -1,0 +1,22 @@
+# DataPulse - AI-Powered Data Incident Command Center
+# Core SDK
+data-ai-sdk[langchain]>=0.1.0
+
+# Web UI
+streamlit>=1.38.0
+plotly>=5.24.0
+streamlit-agraph>=0.0.45
+
+# Data models & config
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP client (for OpenMetadata REST API)
+httpx>=0.27.0
+
+# AI / LLM (for agent orchestration)
+langchain>=0.3.0
+langchain-openai>=0.2.0
+
+# Utilities
+rich>=13.0.0
