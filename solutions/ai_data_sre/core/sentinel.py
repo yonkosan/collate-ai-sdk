@@ -185,22 +185,15 @@ class Sentinel:
         end_ts = int(now.timestamp() * 1000)
 
         fqn = f"{failure.table_fqn}.{failure.column}.{failure.test_case_name}" if failure.column else failure.test_case_name
+        # Use the test case ID directly for history — the FQN is only for reference
         resp = self._client.get(
-            f"/api/v1/dataQuality/testCases/name/{fqn}",
-            params={"fields": "testCaseResult"},
+            f"/api/v1/dataQuality/testCases/{failure.test_case_id}/testCaseResult",
+            params={"startTs": start_ts, "endTs": end_ts, "limit": 10},
         )
         if resp.status_code != 200:
             return None
 
-        # Fetch result history
-        resp2 = self._client.get(
-            f"/api/v1/dataQuality/testCases/{failure.test_case_id}/testCaseResult",
-            params={"startTs": start_ts, "endTs": end_ts, "limit": 10},
-        )
-        if resp2.status_code != 200:
-            return None
-
-        data = resp2.json()
+        data = resp.json()
         results_raw = data.get("data", [])
         if not results_raw:
             return None

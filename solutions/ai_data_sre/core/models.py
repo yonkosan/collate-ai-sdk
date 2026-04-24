@@ -133,5 +133,19 @@ class Incident(BaseModel):
         self.updated_at = datetime.now(timezone.utc)
 
     def transition(self, status: IncidentStatus) -> None:
+        VALID_TRANSITIONS = {
+            IncidentStatus.DETECTED: {IncidentStatus.INVESTIGATING},
+            IncidentStatus.INVESTIGATING: {IncidentStatus.REPORTED},
+            IncidentStatus.REPORTED: {IncidentStatus.ACKNOWLEDGED, IncidentStatus.RESOLVED},
+            IncidentStatus.ACKNOWLEDGED: {IncidentStatus.RESOLVED},
+        }
+        valid = VALID_TRANSITIONS.get(self.status, set())
+        if status not in valid:
+            # Allow no-op transitions (idempotent)
+            if status == self.status:
+                return
+            raise ValueError(
+                f"Cannot transition from {self.status.value} to {status.value}"
+            )
         self.status = status
         self.updated_at = datetime.now(timezone.utc)

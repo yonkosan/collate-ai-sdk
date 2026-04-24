@@ -17,14 +17,6 @@ import type { IncidentDetail, UserInfo } from '../types';
 import { FailureHistoryChart } from './FailureHistoryChart';
 import { LineageGraph } from './LineageGraph';
 
-const SEVERITY_NAMES: Record<number, string> = {
-  1: 'CRITICAL',
-  2: 'HIGH',
-  3: 'MEDIUM',
-  4: 'LOW',
-  5: 'INFO',
-};
-
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: 'text-red-400',
   HIGH: 'text-orange-400',
@@ -45,12 +37,14 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [omBaseUrl, setOmBaseUrl] = useState('http://localhost:8585');
 
-  const sevName = SEVERITY_NAMES[incident.severity] ?? 'UNKNOWN';
+  const sevName = incident.severity;
   const sevColor = SEVERITY_COLORS[sevName] ?? 'text-gray-400';
 
   useEffect(() => {
     api.listUsers().then(setUsers).catch(() => {});
+    api.getConfig().then((cfg) => setOmBaseUrl(cfg.om_base_url)).catch(() => {});
   }, []);
 
   const handleAcknowledge = useCallback(async () => {
@@ -92,8 +86,6 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
       setResolveNote('');
     }
   }, [incident.id, resolveNote, onUpdate]);
-
-  const omBaseUrl = 'http://localhost:8585';
 
   return (
     <div>

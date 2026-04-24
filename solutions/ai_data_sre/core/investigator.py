@@ -52,6 +52,7 @@ class Investigator:
 
     def investigate(self, incident: Incident) -> Incident:
         """Run full investigation on an incident: lineage tracing + blast radius."""
+        self._node_cache.clear()
         console.print(
             f"\n[bold cyan]🔎 Investigating incident {incident.id}[/]: {incident.title}"
         )

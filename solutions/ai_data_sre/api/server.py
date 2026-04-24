@@ -141,7 +141,7 @@ def run_pipeline():
         return PipelineResponse(
             status="completed",
             incident_count=len(incidents),
-            incidents=[_incident_to_summary(inc).dict() for inc in incidents],
+            incidents=[_incident_to_summary(inc).model_dump() for inc in incidents],
         )
     finally:
         orch.close()
@@ -159,7 +159,10 @@ def get_incident(incident_id: str):
     inc = _incidents.get(incident_id)
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
-    return inc.dict()
+    data = inc.model_dump()
+    # Normalize severity to string name for frontend consistency
+    data["severity"] = inc.severity.name
+    return data
 
 
 @app.put("/api/incidents/{incident_id}/ack")
@@ -188,8 +191,8 @@ def assign_incident(incident_id: str, body: AssignRequest):
     config = _get_config()
     try:
         with httpx.Client(
-            base_url=config.om_server_url,
-            headers={"Authorization": f"Bearer {config.om_jwt_token}"},
+            base_url=config.openmetadata_host,
+            headers=config.api_headers,
             timeout=10.0,
         ) as client:
             # Find the first test case from the incident's failures
@@ -237,8 +240,8 @@ def list_users():
     config = _get_config()
     try:
         with httpx.Client(
-            base_url=config.om_server_url,
-            headers={"Authorization": f"Bearer {config.om_jwt_token}"},
+            base_url=config.openmetadata_host,
+            headers=config.api_headers,
             timeout=10.0,
         ) as client:
             resp = client.get("/api/v1/users", params={"limit": 50})
@@ -264,8 +267,8 @@ def list_teams():
     config = _get_config()
     try:
         with httpx.Client(
-            base_url=config.om_server_url,
-            headers={"Authorization": f"Bearer {config.om_jwt_token}"},
+            base_url=config.openmetadata_host,
+            headers=config.api_headers,
             timeout=10.0,
         ) as client:
             resp = client.get("/api/v1/teams", params={"limit": 50})
@@ -289,6 +292,13 @@ def list_teams():
 def get_om_link(entity_type: str, fqn: str):
     """Generate a deep link into the OpenMetadata UI for an entity."""
     config = _get_config()
-    base = config.om_server_url.rstrip("/")
+    base = config.openmetadata_host.rstrip("/")
     link = f"{base}/{entity_type}/{fqn}"
     return {"link": link, "entity_type": entity_type, "fqn": fqn}
+
+
+@app.get("/api/config")
+def get_app_config():
+    """Return frontend configuration."""
+    config = _get_config()
+    return {"om_base_url": config.openmetadata_host}

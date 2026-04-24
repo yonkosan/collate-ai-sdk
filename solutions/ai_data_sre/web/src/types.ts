@@ -72,7 +72,7 @@ export interface IncidentReport {
 export interface IncidentDetail {
   id: string;
   title: string;
-  severity: number;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
   status: string;
   failures: TestFailure[];
   failure_histories: TestHistory[];

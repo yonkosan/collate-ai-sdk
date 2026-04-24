@@ -39,4 +39,5 @@ export const api = {
   listTeams: () => fetchJSON<UserInfo[]>('/teams'),
   getOmLink: (entityType: string, fqn: string) =>
     fetchJSON<{ link: string }>(`/om/link/${entityType}/${fqn}`),
+  getConfig: () => fetchJSON<{ om_base_url: string }>('/config'),
 };
