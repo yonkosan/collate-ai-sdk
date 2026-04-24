@@ -32,8 +32,9 @@ console = Console()
 
 _SYSTEM_PROMPT = """\
 You are DataPulse Narrator, an expert data incident analyst. Given structured
-incident data (test failures, lineage-based blast radius, severity), produce a
-crisp, actionable incident report in JSON format.
+incident data (test failures, lineage-based blast radius, severity, ownership,
+data tiers, and failure history), produce a crisp, actionable incident report
+in JSON format.
 
 Respond ONLY with valid JSON matching this schema:
 {
@@ -41,13 +42,18 @@ Respond ONLY with valid JSON matching this schema:
   "root_cause_analysis": "Detailed RCA with specific tables, columns, and data issues",
   "blast_radius_description": "Which assets are affected and how the corruption propagates",
   "severity_justification": "Why this severity level is appropriate",
-  "recommendations": ["Action 1", "Action 2", ...]
+  "recommendations": ["Action 1", "Action 2", ...],
+  "stakeholders_affected": "Which teams/owners are impacted",
+  "trend_analysis": "Is this a new issue or recurring? Based on failure history"
 }
 
 Guidelines:
 - Be specific: reference actual table names, column names, and row counts
 - Explain the propagation path from root cause to downstream impact
+- Mention affected data owners and tiers — Tier 1 assets are business-critical
+- If failure history shows recurring patterns, highlight this urgently
 - Recommendations should be concrete and ordered by priority
+- Include recommended assignee based on table ownership
 - Keep the summary under 100 words
 - Use plain language, avoid jargon
 """
@@ -93,17 +99,40 @@ class Narrator:
             for f in incident.failures
         )
 
+        # Failure history trend
+        history_text = "No history available."
+        if incident.failure_histories:
+            history_lines = []
+            for h in incident.failure_histories:
+                trend = " ".join(
+                    "✓" if r.status == "Success" else "✗" for r in h.results
+                )
+                history_lines.append(
+                    f"  - {h.test_case_name}: {trend} "
+                    f"({h.failure_count}/{h.total_runs} failures, "
+                    f"recurring={h.is_recurring})"
+                )
+            history_text = "\n".join(history_lines)
+
         upstream_text = "None"
         downstream_text = "None"
+        owners_text = "Unknown"
         if br:
             if br.upstream_chain:
                 upstream_text = " → ".join(
-                    a.fqn.rsplit(".", 1)[-1] for a in br.upstream_chain
+                    f"{a.fqn.rsplit('.', 1)[-1]} [tier={a.tier or 'unset'}, owners={a.owners or 'none'}]"
+                    for a in br.upstream_chain
                 )
             if br.downstream_impact:
                 downstream_text = ", ".join(
-                    a.fqn.rsplit(".", 1)[-1] for a in br.downstream_impact
+                    f"{a.fqn.rsplit('.', 1)[-1]} [tier={a.tier or 'unset'}, owners={a.owners or 'none'}]"
+                    for a in br.downstream_impact
                 )
+            all_owners = set()
+            for a in br.upstream_chain + br.downstream_impact:
+                all_owners.update(a.owners)
+            if all_owners:
+                owners_text = ", ".join(sorted(all_owners))
 
         return f"""\
 Incident ID: {incident.id}
@@ -114,12 +143,16 @@ Status: {incident.status.value}
 Failed Test Cases:
 {failures_text}
 
+Failure History (oldest → newest):
+{history_text}
+
 Blast Radius:
   Root cause table: {br.root_cause_table if br else 'Unknown'}
   Root cause column: {br.root_cause_column if br else 'Unknown'}
   Upstream chain: {upstream_text}
   Downstream impact: {downstream_text}
   Total affected assets: {br.total_affected_assets if br else 0}
+  Affected data owners: {owners_text}
 
 Generate the incident report JSON."""
 
@@ -145,6 +178,8 @@ Generate the incident report JSON."""
             blast_radius_description=data.get("blast_radius_description", ""),
             severity_justification=data.get("severity_justification", ""),
             recommendations=data.get("recommendations", []),
+            stakeholders_affected=data.get("stakeholders_affected", ""),
+            trend_analysis=data.get("trend_analysis", ""),
         )
 
     @staticmethod

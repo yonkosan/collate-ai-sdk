@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # DataPulse — One-command demo launcher
-# Usage: ./run_demo.sh
+# Usage: ./run_demo.sh           (React UI, default)
+#        ./run_demo.sh --classic  (Streamlit UI)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+
+UI_MODE="react"
+if [[ "${1:-}" == "--classic" ]]; then
+    UI_MODE="streamlit"
+fi
 
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
@@ -91,15 +97,47 @@ fi
 
 # ─── Launch dashboard ──────────────────────────────────────────────────────────
 
-step 5 5 "Launching Streamlit dashboard…"
-echo ""
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BOLD}  Dashboard: ${BLUE}http://localhost:8501${NC}"
-echo -e "${BOLD}  Click '▶ Run Full Pipeline' to start the incident scan${NC}"
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+step 5 5 "Launching dashboard…"
 echo ""
 
-python3 -m streamlit run ui/app.py \
-    --server.port 8501 \
-    --server.headless true \
-    --browser.gatherUsageStats false
+if [[ "$UI_MODE" == "react" ]]; then
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}  API Server:  ${BLUE}http://localhost:8000${NC}"
+    echo -e "${BOLD}  Dashboard:   ${BLUE}http://localhost:3001${NC}"
+    echo -e "${BOLD}  Click 'Run Pipeline' to scan for incidents${NC}"
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    # Install web UI deps if needed
+    if [ ! -d web/node_modules ]; then
+        echo "  Installing React UI dependencies…"
+        (cd web && npm install --silent)
+    fi
+
+    # Start FastAPI backend in background
+    python3 -m uvicorn api.server:app --host 0.0.0.0 --port 8000 &
+    API_PID=$!
+    trap "kill $API_PID 2>/dev/null" EXIT
+
+    # Wait for API to be ready
+    for i in $(seq 1 10); do
+        if curl -sf http://localhost:8000/api/health &>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    # Start React dev server
+    (cd web && npx vite --host 0.0.0.0 --port 3001)
+else
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}  Dashboard: ${BLUE}http://localhost:8501${NC}"
+    echo -e "${BOLD}  Click '▶ Run Full Pipeline' to start the incident scan${NC}"
+    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    python3 -m streamlit run ui/app.py \
+        --server.port 8501 \
+        --server.headless true \
+        --browser.gatherUsageStats false
+fi

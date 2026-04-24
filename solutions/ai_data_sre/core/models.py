@@ -53,13 +53,36 @@ class TestFailure(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class TestResultRecord(BaseModel):
+    """A single historical test result for trend analysis."""
+
+    timestamp: datetime
+    status: str  # "Success" or "Failed"
+    result_message: str = ""
+
+
+class TestHistory(BaseModel):
+    """Historical test results for a test case."""
+
+    test_case_name: str
+    results: List[TestResultRecord] = Field(default_factory=list)
+    total_runs: int = 0
+    failure_count: int = 0
+    first_failure: Optional[datetime] = None
+    is_recurring: bool = False
+
+
 class AffectedAsset(BaseModel):
     """An entity in the blast radius of an incident."""
 
     fqn: str
     entity_type: str
     display_name: Optional[str] = None
+    description: Optional[str] = None
     owners: List[str] = Field(default_factory=list)
+    tier: Optional[str] = None
+    domain: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     depth: int = 0  # hops from the root cause
 
 
@@ -82,6 +105,8 @@ class IncidentReport(BaseModel):
     blast_radius_description: str
     severity_justification: str
     recommendations: List[str] = Field(default_factory=list)
+    stakeholders_affected: str = ""
+    trend_analysis: str = ""
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -93,8 +118,13 @@ class Incident(BaseModel):
     severity: Severity = Severity.MEDIUM
     status: IncidentStatus = IncidentStatus.DETECTED
     failures: List[TestFailure] = Field(default_factory=list)
+    failure_histories: List[TestHistory] = Field(default_factory=list)
     blast_radius: Optional[BlastRadius] = None
     report: Optional[IncidentReport] = None
+    assigned_to: Optional[str] = None
+    resolution_note: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

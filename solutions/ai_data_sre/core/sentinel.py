@@ -23,7 +23,7 @@ import httpx
 from rich.console import Console
 
 from core.config import DataPulseConfig
-from core.models import Incident, IncidentStatus, Severity, TestFailure
+from core.models import Incident, IncidentStatus, Severity, TestFailure, TestHistory, TestResultRecord
 
 console = Console()
 
@@ -73,6 +73,11 @@ class Sentinel:
         incidents = []
         for table_fqn, table_failures in by_table.items():
             incident = self._create_incident(table_fqn, table_failures)
+            # Fetch failure history for each test case
+            for f in table_failures:
+                history = self._fetch_test_history(f)
+                if history:
+                    incident.failure_histories.append(history)
             incidents.append(incident)
             console.print(
                 f"  📋 Incident [bold]{incident.id}[/]: "
@@ -170,6 +175,59 @@ class Sentinel:
         if depth >= 1:
             return Severity.HIGH
         return Severity.MEDIUM
+
+    def _fetch_test_history(self, failure: TestFailure) -> TestHistory | None:
+        """Fetch last 10 historical results for a test case."""
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
+        end_ts = int(now.timestamp() * 1000)
+
+        fqn = f"{failure.table_fqn}.{failure.column}.{failure.test_case_name}" if failure.column else failure.test_case_name
+        resp = self._client.get(
+            f"/api/v1/dataQuality/testCases/name/{fqn}",
+            params={"fields": "testCaseResult"},
+        )
+        if resp.status_code != 200:
+            return None
+
+        # Fetch result history
+        resp2 = self._client.get(
+            f"/api/v1/dataQuality/testCases/{failure.test_case_id}/testCaseResult",
+            params={"startTs": start_ts, "endTs": end_ts, "limit": 10},
+        )
+        if resp2.status_code != 200:
+            return None
+
+        data = resp2.json()
+        results_raw = data.get("data", [])
+        if not results_raw:
+            return None
+
+        records = []
+        for r in results_raw:
+            ts_ms = r.get("timestamp", 0)
+            records.append(TestResultRecord(
+                timestamp=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc),
+                status=r.get("testCaseStatus", "Unknown"),
+                result_message=r.get("result", ""),
+            ))
+
+        # Sort oldest first
+        records.sort(key=lambda r: r.timestamp)
+
+        failure_count = sum(1 for r in records if r.status == "Failed")
+        first_fail = next((r.timestamp for r in records if r.status == "Failed"), None)
+
+        return TestHistory(
+            test_case_name=failure.test_case_name,
+            results=records,
+            total_runs=len(records),
+            failure_count=failure_count,
+            first_failure=first_fail,
+            is_recurring=failure_count >= 2,
+        )
 
 
 def main() -> None:

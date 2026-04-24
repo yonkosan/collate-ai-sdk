@@ -7,6 +7,10 @@ streamlit>=1.38.0
 plotly>=5.24.0
 streamlit-agraph>=0.0.45
 
+# REST API backend
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
 # Data models & config
 pydantic>=2.0.0
 python-dotenv>=1.0.0
@@ -20,6 +24,7 @@ pymysql>=1.1.0
 # AI / LLM (for agent orchestration)
 langchain>=0.3.0
 langchain-openai>=0.2.0
+openai>=1.0.0
 
 # Utilities
 rich>=13.0.0

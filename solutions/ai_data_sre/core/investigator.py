@@ -142,12 +142,30 @@ class Investigator:
                 "name": entity.get("name", ""),
                 "fqn": entity.get("fullyQualifiedName", ""),
                 "type": "table",
+                "description": entity.get("description", ""),
+                "owners": [
+                    o.get("displayName", o.get("name", ""))
+                    for o in entity.get("owners", [])
+                ],
+                "tags": [
+                    t.get("tagFQN", "")
+                    for t in entity.get("tags", [])
+                ],
             }
         for node in lineage.get("nodes", []):
             self._node_cache[node["id"]] = {
                 "name": node.get("name", ""),
                 "fqn": node.get("fullyQualifiedName", ""),
                 "type": "table",
+                "description": node.get("description", ""),
+                "owners": [
+                    o.get("displayName", o.get("name", ""))
+                    for o in node.get("owners", [])
+                ],
+                "tags": [
+                    t.get("tagFQN", "")
+                    for t in node.get("tags", [])
+                ],
             }
 
     def _walk_upstream(self, lineage: dict, entity_id: str) -> List[AffectedAsset]:
@@ -176,11 +194,17 @@ class Investigator:
                     if parent_id in visited:
                         continue
                     node = self._node_cache.get(parent_id, {})
+                    tags = node.get("tags", [])
+                    tier = next((t for t in tags if t.startswith("Tier.")), None)
                     chain.append(
                         AffectedAsset(
                             fqn=node.get("fqn", parent_id),
                             entity_type="table",
                             display_name=node.get("name", ""),
+                            description=node.get("description", ""),
+                            owners=node.get("owners", []),
+                            tags=tags,
+                            tier=tier,
                             depth=depth + 1,
                         )
                     )
@@ -216,11 +240,17 @@ class Investigator:
                     if child_id in visited:
                         continue
                     node = self._node_cache.get(child_id, {})
+                    tags = node.get("tags", [])
+                    tier = next((t for t in tags if t.startswith("Tier.")), None)
                     impact.append(
                         AffectedAsset(
                             fqn=node.get("fqn", child_id),
                             entity_type="table",
                             display_name=node.get("name", ""),
+                            description=node.get("description", ""),
+                            owners=node.get("owners", []),
+                            tags=tags,
+                            tier=tier,
                             depth=depth + 1,
                         )
                     )
@@ -233,12 +263,19 @@ class Investigator:
 
     @staticmethod
     def _reassess_severity(incident: Incident) -> Severity:
-        """Re-assess severity based on blast radius findings."""
+        """Re-assess severity based on blast radius and tier of affected assets."""
         br = incident.blast_radius
         if not br:
             return incident.severity
 
         total = br.total_affected_assets
+
+        # If any Tier 1 asset is in the blast radius, it's critical
+        all_assets = br.upstream_chain + br.downstream_impact
+        has_tier1 = any(a.tier == "Tier.Tier1" for a in all_assets)
+        if has_tier1:
+            return Severity.CRITICAL
+
         if total >= 5:
             return Severity.CRITICAL
         if total >= 3:
