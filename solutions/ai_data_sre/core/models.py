@@ -4,11 +4,21 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
-from enum import IntEnum, StrEnum
+from enum import IntEnum
+from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Backport of StrEnum for Python <3.11."""
 
 
 class Severity(IntEnum):
@@ -37,7 +47,7 @@ class TestFailure(BaseModel):
     test_case_id: str
     test_case_name: str
     table_fqn: str
-    column: str | None = None
+    column: Optional[str] = None
     test_definition: str
     result_message: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -48,8 +58,8 @@ class AffectedAsset(BaseModel):
 
     fqn: str
     entity_type: str
-    display_name: str | None = None
-    owners: list[str] = Field(default_factory=list)
+    display_name: Optional[str] = None
+    owners: List[str] = Field(default_factory=list)
     depth: int = 0  # hops from the root cause
 
 
@@ -57,11 +67,11 @@ class BlastRadius(BaseModel):
     """The upstream root-cause chain and downstream impact zone."""
 
     root_cause_table: str
-    root_cause_column: str | None = None
-    upstream_chain: list[AffectedAsset] = Field(default_factory=list)
-    downstream_impact: list[AffectedAsset] = Field(default_factory=list)
+    root_cause_column: Optional[str] = None
+    upstream_chain: List[AffectedAsset] = Field(default_factory=list)
+    downstream_impact: List[AffectedAsset] = Field(default_factory=list)
     total_affected_assets: int = 0
-    affected_owners: list[str] = Field(default_factory=list)
+    affected_owners: List[str] = Field(default_factory=list)
 
 
 class IncidentReport(BaseModel):
@@ -71,7 +81,7 @@ class IncidentReport(BaseModel):
     root_cause_analysis: str
     blast_radius_description: str
     severity_justification: str
-    recommendations: list[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -82,9 +92,9 @@ class Incident(BaseModel):
     title: str
     severity: Severity = Severity.MEDIUM
     status: IncidentStatus = IncidentStatus.DETECTED
-    failures: list[TestFailure] = Field(default_factory=list)
-    blast_radius: BlastRadius | None = None
-    report: IncidentReport | None = None
+    failures: List[TestFailure] = Field(default_factory=list)
+    blast_radius: Optional[BlastRadius] = None
+    report: Optional[IncidentReport] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
