@@ -2,7 +2,14 @@
 
 > *"When your data breaks, DataPulse finds out why — before your stakeholders do."*
 
-DataPulse is an autonomous multi-agent system that detects data quality failures, traces root causes through column-level lineage, maps blast radius to downstream consumers, and generates actionable incident reports — all powered by OpenMetadata and the Collate AI SDK.
+<p align="center">
+  <img src="https://img.shields.io/badge/OpenMetadata-Powered-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/AI-GPT--4o--mini-green?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Python-3.9+-yellow?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/License-Apache%202.0-red?style=for-the-badge" />
+</p>
+
+DataPulse is an autonomous **multi-agent system** that detects data quality failures, traces root causes through column-level lineage, maps blast radius to downstream consumers, and generates actionable incident reports — all powered by **OpenMetadata** and the **Collate AI SDK**.
 
 ---
 
@@ -12,12 +19,15 @@ Data quality failures propagate silently through pipelines. By the time a dashbo
 
 ## The Solution
 
-DataPulse automates the entire data incident lifecycle:
+DataPulse automates the **entire data incident lifecycle** with three specialized AI agents:
 
-1. **Detect** — The Sentinel agent monitors OpenMetadata for DQ test failures in real-time
-2. **Investigate** — The Investigator traces column-level lineage to pinpoint the root cause and map every affected downstream asset
-3. **Report** — The Narrator generates severity-scored incident reports with remediation recommendations
-4. **Visualize** — A Streamlit dashboard shows the full incident lifecycle with interactive lineage graphs
+| Agent | Role | How |
+|-------|------|-----|
+| **🔍 Sentinel** | Detect failures | Polls OpenMetadata DQ API for failed test cases, groups by table, assigns initial severity |
+| **🔎 Investigator** | Trace root cause + blast radius | BFS walks upstream lineage to root cause, downstream to map all impacted assets, escalates severity |
+| **📝 Narrator** | Generate incident reports | GPT-4o-mini produces structured RCA with summary, blast radius, severity justification, and recommendations |
+
+All three agents are orchestrated in a single pipeline and visualized in a **Streamlit dashboard** with interactive lineage graphs.
 
 ---
 
@@ -41,8 +51,8 @@ DataPulse automates the entire data incident lifecycle:
 │  ┌────┴─────────────────┴──────────────────┴────┐              │
 │  │              STREAMLIT DASHBOARD              │              │
 │  │  ┌──────────┐ ┌───────────┐ ┌─────────────┐ │              │
-│  │  │ Incident │ │  Lineage  │ │     AI      │ │              │
-│  │  │  Cards   │ │   Graph   │ │Investigation│ │              │
+│  │  │ Incident │ │  Lineage  │ │   AI Report  │ │              │
+│  │  │  Cards   │ │   Graph   │ │   Viewer    │ │              │
 │  │  └──────────┘ └───────────┘ └─────────────┘ │              │
 │  └──────────────────────────────────────────────┘              │
 │                         │                                       │
@@ -51,35 +61,60 @@ DataPulse automates the entire data incident lifecycle:
 │  ┌──────────────────────────────────────────────┐              │
 │  │            OpenMetadata (localhost:8585)       │              │
 │  │  ┌─────────┐ ┌─────────┐ ┌────────────────┐ │              │
-│  │  │ DQ API  │ │ Lineage │ │   MCP Server   │ │              │
-│  │  │  Tests  │ │  Graph  │ │  (AI SDK Tools)│ │              │
+│  │  │  DQ API │ │ Lineage │ │  Entity Catalog │ │              │
+│  │  │  Tests  │ │  Graph  │ │  (REST API)    │ │              │
 │  │  └─────────┘ └─────────┘ └────────────────┘ │              │
 │  └──────────────────────────────────────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Agent Pipeline
+### Agent Pipeline Detail
 
 ```
-                    Sentinel                 Investigator              Narrator
-                   ┌────────┐               ┌────────────┐           ┌─────────┐
-  DQ Test ────────►│ Detect │──► Incident ─►│ Trace      │──►       │Generate │
-  Failures         │ & Group│               │ Lineage    │  Enriched │ Report  │──► Dashboard
-  (OM REST API)    │        │               │ (MCP Tools)│  Incident │(AI SDK) │
-                   └────────┘               │ Map Blast  │           └─────────┘
-                                            │ Radius     │
-                                            └────────────┘
+  OpenMetadata DQ API         Sentinel               Investigator              Narrator
+  ┌─────────────────┐       ┌──────────┐            ┌─────────────┐          ┌──────────┐
+  │ testCases?      │──────►│ Detect & │──Incident─►│ Trace       │─Enriched►│ Generate │──► Dashboard
+  │ status=Failed   │       │ Group by │            │ Lineage     │ Incident │ Report   │
+  │                 │       │ Table    │            │ Map Blast   │          │ (GPT-4o) │
+  └─────────────────┘       │ Assess   │            │ Radius      │          └──────────┘
+                            │ Severity │            │ Escalate    │
+                            └──────────┘            │ Severity    │
+                                                    └─────────────┘
 ```
 
 ### OpenMetadata Integration Points
 
 | Feature | How DataPulse Uses It |
 |---|---|
-| **Data Quality API** | Sentinel polls test case results to detect failures |
-| **Column-Level Lineage** | Investigator traces upstream to root cause, downstream for blast radius |
-| **MCP Tools** | `search_metadata`, `get_entity_lineage`, `get_entity_details`, `root_cause_analysis` |
-| **AI Agents** | Narrator invokes AI SDK agents for natural-language report generation |
-| **Entity Details** | Retrieve table owners, descriptions, tags for stakeholder identification |
+| **Data Quality API** | `GET /api/v1/dataQuality/testCases?testCaseStatus=Failed` — Sentinel polls for failures |
+| **Column-Level Lineage** | `GET /api/v1/lineage/table/name/{fqn}?upstreamDepth=3&downstreamDepth=3` — Investigator traces upstream root cause + downstream impact |
+| **Entity REST API** | `PUT /api/v1/tables`, `PUT /api/v1/lineage` — Bootstrap provisions entities + lineage edges |
+| **Test Case Results** | `POST /api/v1/testCases/testCaseResults/{fqn}` — Bootstrap seeds pass/fail test results |
+
+---
+
+## Demo Scenario: The Chaos Playground
+
+The bootstrap script creates an **8-table supply chain analytics pipeline** in OpenMetadata with a **realistic hidden fault**:
+
+```
+raw_orders ──────┐
+                 ├──► staging_orders ──► fact_order_metrics ──┐
+raw_products ────┘                                            ├──► exec_dashboard_kpis
+                                                              │
+raw_suppliers ──► staging_suppliers ──► fact_supply_chain ─────┘
+```
+
+### The Hidden Fault
+
+`raw_orders.order_date` contains **847 rows with future dates** (up to 2027-11-15). This is a realistic data ingestion bug — a source system timezone issue or a batch job loading test data into production.
+
+**The cascade:**
+1. **`raw_orders.order_date`** — DQ test `columnValuesToBeBetween` **FAILS** (847 rows exceed max date)
+2. **`staging_orders.total_price`** — Pricing logic produces **negative values** for future-dated orders → **FAILS**
+3. **`exec_dashboard_kpis.daily_revenue`** — Aggregated revenue is wildly inflated → **FAILS**
+
+The **Sentinel** detects 3 failures. The **Investigator** traces lineage upstream and discovers that `raw_orders` is the **root cause** — and that the blast radius extends all the way to the **executive dashboard** (up to 11 assets affected). The **Narrator** generates detailed reports explaining exactly what happened, why, and what to do about it.
 
 ---
 
@@ -89,88 +124,129 @@ DataPulse automates the entire data incident lifecycle:
 solutions/ai_data_sre/
 ├── README.md                          # This file
 ├── requirements.txt                   # Python dependencies
+├── run_demo.sh                        # One-command demo launcher
 ├── .env.example                       # Environment variable template
 │
-├── bootstrap/                         # Phase 1: Demo data provisioning
+├── bootstrap/                         # Demo data provisioning
 │   ├── __init__.py
-│   └── provision_metadata.py          # Creates supply-chain pipeline with hidden faults
+│   ├── provision_mysql.py             # Creates 8 tables with 7000+ rows + hidden fault
+│   └── provision_metadata.py          # Registers entities, lineage, DQ tests in OpenMetadata
 │
-├── core/                              # Phase 2-5: Agent logic
+├── core/                              # Multi-agent pipeline
 │   ├── __init__.py
-│   ├── config.py                      # Configuration management
+│   ├── config.py                      # Configuration (loads from .env)
 │   ├── models.py                      # Pydantic domain models (Incident, BlastRadius, etc.)
 │   ├── sentinel.py                    # Agent 1: Monitor DQ failures
-│   ├── investigator.py                # Agent 2: Lineage-based RCA
-│   ├── narrator.py                    # Agent 3: Report generation
+│   ├── investigator.py                # Agent 2: Lineage-based root cause analysis
+│   ├── narrator.py                    # Agent 3: AI-powered report generation
 │   └── orchestrator.py                # Pipeline coordinator
 │
-├── ui/                                # Phase 6: Streamlit dashboard
+├── ui/                                # Streamlit dashboard
 │   ├── __init__.py
-│   ├── app.py                         # Main Streamlit entry point
-│   ├── pages/
-│   │   ├── dashboard.py               # Incident overview
-│   │   ├── incident_detail.py         # Detailed view with lineage graph
-│   │   └── investigate.py             # AI chat for investigation
+│   ├── app.py                         # Main entry point (dark theme, 3 tabs)
 │   └── components/
-│       ├── incident_card.py           # Incident card widget
-│       ├── lineage_graph.py           # Interactive lineage visualization
-│       ├── severity_badge.py          # Color-coded severity indicator
-│       └── metrics.py                 # KPI metrics display
+│       ├── __init__.py
+│       ├── incident_cards.py          # Severity badges, KPI cards, expandable cards
+│       └── lineage_graph.py           # Interactive lineage visualization (streamlit-agraph)
 │
 └── tests/                             # Unit tests
     ├── __init__.py
-    ├── test_models.py
-    ├── test_sentinel.py
-    ├── test_investigator.py
-    └── test_narrator.py
+    ├── test_models.py                 # Domain model tests
+    ├── test_sentinel.py               # Sentinel agent tests (mocked HTTP)
+    ├── test_investigator.py           # Investigator agent tests (mocked lineage)
+    └── test_narrator.py               # Narrator agent tests (mocked LLM)
 ```
-
----
-
-## Demo Scenario: The Chaos Playground
-
-The `bootstrap/provision_metadata.py` script creates a **5-table supply chain analytics pipeline** in OpenMetadata with a realistic hidden fault:
-
-```
-raw_orders ──┐
-             ├──► staging_orders ──► fact_order_metrics ──┐
-raw_products ┘                                            ├──► exec_dashboard_kpis
-                                                          │
-raw_suppliers ──► staging_suppliers ──► fact_supply_chain ─┘
-```
-
-### The Hidden Fault
-
-`raw_orders.order_date` contains **847 rows with future dates** (up to 2027-11-15). This is a realistic data ingestion bug — perhaps a source system timezone issue or a batch job loading test data into production.
-
-**The cascade**:
-1. `raw_orders.order_date` — DQ test `columnValuesToBeBetween` **FAILS**
-2. `staging_orders.total_price` — Pricing logic produces negative values for future-dated orders → **FAILS**
-3. `exec_dashboard_kpis.daily_revenue` — Aggregated revenue is wildly inflated → **FAILS**
-
-The Sentinel detects the failures. The Investigator traces lineage upstream and discovers that `raw_orders.order_date` is the **root cause** — and that the blast radius extends all the way to the **executive dashboard**.
 
 ---
 
 ## Quick Start
 
+### Prerequisites
+
+- **Python 3.9+** (tested with 3.9, 3.10, 3.11)
+- **Docker** running with OpenMetadata dev container at `localhost:8585`
+- **OpenAI API key** (for GPT-4o-mini report generation)
+
+### One-Command Demo
+
 ```bash
-# 1. Clone and navigate
+cd collate-ai-sdk/solutions/ai_data_sre
+chmod +x run_demo.sh
+./run_demo.sh
+```
+
+This will:
+1. Install dependencies
+2. Provision MySQL tables with hidden faults
+3. Register entities + lineage + DQ tests in OpenMetadata
+4. Launch the Streamlit dashboard at **http://localhost:8501**
+
+### Manual Setup
+
+```bash
+# 1. Navigate to the project
 cd collate-ai-sdk/solutions/ai_data_sre
 
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Configure
+# 3. Configure environment
 cp .env.example .env
-# Edit .env with your OpenMetadata host, token, and OpenAI key
+# Edit .env with your OpenMetadata token and OpenAI API key
 
-# 4. Provision the chaos playground
+# 4. Provision the chaos playground (requires OpenMetadata + MySQL containers)
+python -m bootstrap.provision_mysql
 python -m bootstrap.provision_metadata
 
-# 5. Run the dashboard (after agents are implemented)
-streamlit run ui/app.py
+# 5. Launch the dashboard
+python -m streamlit run ui/app.py --server.port 8501
+
+# 6. Open http://localhost:8501 and click "▶ Run Full Pipeline"
 ```
+
+### Running Tests
+
+```bash
+cd collate-ai-sdk/solutions/ai_data_sre
+python -m pytest tests/ -v
+```
+
+---
+
+## Dashboard Features
+
+### 📋 Incident Dashboard
+- Incidents sorted by severity (most critical first)
+- Color-coded severity badges (🔴 CRITICAL, 🟠 HIGH, 🟡 MEDIUM)
+- KPI row: total incidents, critical/high count, total blast radius, tables affected
+- Expandable cards with full AI-generated reports
+
+### 🔗 Blast Radius Graph
+- Interactive lineage visualization using `streamlit-agraph`
+- Color-coded nodes: **red** = root cause, **orange** = affected, **indigo** = healthy
+- Red edges show the corruption propagation path
+- Incident selector to visualize blast radius per incident
+
+### 📄 Full Reports
+- AI-generated root cause analysis by GPT-4o-mini
+- Structured sections: summary, RCA, blast radius, severity justification
+- Numbered actionable recommendations
+- Raw test failure details with table/column/message
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Metadata Platform** | [OpenMetadata](https://open-metadata.org/) | DQ tests, lineage graph, entity catalog |
+| **AI Reports** | [OpenAI GPT-4o-mini](https://openai.com/) | Structured incident report generation |
+| **Dashboard** | [Streamlit](https://streamlit.io/) | Interactive web UI |
+| **Lineage Viz** | [streamlit-agraph](https://github.com/ChristianKlose/streamlit-agraph) | Graph visualization |
+| **Domain Models** | [Pydantic](https://docs.pydantic.dev/) | Type-safe data validation |
+| **HTTP Client** | [httpx](https://www.python-httpx.org/) | REST API calls to OpenMetadata |
+| **CLI Output** | [Rich](https://rich.readthedocs.io/) | Terminal formatting and tables |
+| **Database** | [MySQL](https://www.mysql.com/) + [PyMySQL](https://pymysql.readthedocs.io/) | Demo data with realistic faults |
 
 ---
 
@@ -178,26 +254,28 @@ streamlit run ui/app.py
 
 | Phase | Component | Description | Status |
 |-------|-----------|-------------|--------|
-| 0 | Scaffold | File structure, config, models | ✅ Done |
-| 1 | Chaos Playground | Provision supply-chain pipeline with faults | ✅ Done |
-| 2 | Sentinel | DQ failure detection agent | 🔲 Next |
-| 3 | Investigator | Lineage-based root cause analysis | 🔲 |
-| 4 | Narrator | AI-powered report generation | 🔲 |
-| 5 | Orchestrator | Agent pipeline coordination | 🔲 |
-| 6 | Dashboard | Streamlit UI with lineage visualization | 🔲 |
-| 7 | Polish | README, demo script, presentation | 🔲 |
+| 0 | Scaffold | File structure, config, Pydantic models | ✅ Done |
+| 1 | Chaos Playground | MySQL tables + OpenMetadata provisioning with hidden faults | ✅ Done |
+| 2 | Sentinel | DQ failure detection agent (polls OM API, groups by table, assesses severity) | ✅ Done |
+| 3 | Investigator | Lineage-based RCA (BFS upstream/downstream, blast radius mapping, severity escalation) | ✅ Done |
+| 4 | Narrator | GPT-4o-mini report generation (structured JSON, fallback for no API key) | ✅ Done |
+| 5 | Orchestrator | Sentinel → Investigator → Narrator pipeline coordination | ✅ Done |
+| 6 | Dashboard | Streamlit UI with lineage graph, incident cards, KPI metrics | ✅ Done |
+| 7 | Polish | README, demo script, unit tests | ✅ Done |
 
 ---
 
-## Tech Stack
+## How It Works (End-to-End)
 
-- **[Collate AI SDK](../../python/)** — MCP tools + AI agent invocation
-- **[OpenMetadata](https://open-metadata.org/)** — Metadata platform (DQ, lineage, entity catalog)
-- **[Streamlit](https://streamlit.io/)** — Dashboard UI
-- **[LangChain](https://langchain.com/)** — Agent orchestration framework
-- **[Plotly](https://plotly.com/)** — Interactive lineage visualization
-- **[Pydantic](https://docs.pydantic.dev/)** — Domain model validation
-- **[Rich](https://rich.readthedocs.io/)** — Terminal output formatting
+1. **Bootstrap** provisions a realistic supply-chain pipeline in MySQL and OpenMetadata with hidden data quality faults (future dates in `raw_orders`)
+
+2. **Sentinel** polls `GET /api/v1/dataQuality/testCases?testCaseStatus=Failed` and detects 3 failures across `raw_orders`, `staging_orders`, and `exec_dashboard_kpis`
+
+3. **Investigator** fetches lineage for each failing table via `GET /api/v1/lineage/table/name/{fqn}`, walks upstream (BFS) to find `raw_orders` as root cause, walks downstream to map blast radius of 4–11 assets, and escalates severity based on impact
+
+4. **Narrator** sends incident data to GPT-4o-mini with a structured prompt, receives JSON with summary, RCA, blast radius description, severity justification, and recommendations
+
+5. **Dashboard** renders everything in a dark-themed Streamlit app with interactive lineage graphs and expandable incident cards
 
 ---
 
