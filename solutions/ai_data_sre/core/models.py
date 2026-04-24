@@ -41,6 +41,13 @@ class IncidentStatus(StrEnum):
     RESOLVED = "resolved"
 
 
+class FaultyRow(BaseModel):
+    """A single row from the database that failed a DQ check."""
+
+    row_data: dict
+    reason: str = ""
+
+
 class TestFailure(BaseModel):
     """A single data quality test failure detected by the Sentinel."""
 
@@ -50,6 +57,7 @@ class TestFailure(BaseModel):
     column: Optional[str] = None
     test_definition: str
     result_message: str
+    faulty_rows: List[FaultyRow] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -122,9 +130,13 @@ class Incident(BaseModel):
     blast_radius: Optional[BlastRadius] = None
     report: Optional[IncidentReport] = None
     assigned_to: Optional[str] = None
+    acknowledged_by: Optional[str] = None
+    resolved_by: Optional[str] = None
     resolution_note: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
+    slack_thread_ts: Optional[str] = None
+    slack_thread_url: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

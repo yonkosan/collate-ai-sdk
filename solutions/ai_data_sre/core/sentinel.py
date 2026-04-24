@@ -65,6 +65,9 @@ class Sentinel:
 
         console.print(f"  Found [red]{len(failures)}[/] failed test case(s)")
 
+        # Fetch faulty rows for each failure
+        self._attach_faulty_rows(failures)
+
         # Group failures by table
         by_table: dict[str, list[TestFailure]] = defaultdict(list)
         for f in failures:
@@ -141,6 +144,19 @@ class Sentinel:
             )
 
         return failures
+
+    def _attach_faulty_rows(self, failures: list[TestFailure]) -> None:
+        """Fetch sample faulty rows for each failure from MySQL."""
+        from core.faulty_rows import fetch_faulty_rows
+
+        for f in failures:
+            try:
+                rows = fetch_faulty_rows(self._config, f)
+                if rows:
+                    f.faulty_rows = rows
+                    console.print(f"  📊 Found {len(rows)} faulty row(s) for {f.test_case_name}")
+            except Exception as exc:
+                console.print(f"  [dim]Could not fetch faulty rows: {exc}[/]")
 
     def _create_incident(
         self, table_fqn: str, failures: list[TestFailure]

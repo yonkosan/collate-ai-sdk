@@ -48,6 +48,8 @@ class DataPulseConfig:
     ai_sdk_token: str
     openai_api_key: str
     mysql: MySQLConfig
+    slack_bot_token: str = ""
+    slack_channel_id: str = ""
     poll_interval_seconds: int = 30
     severity_threshold: int = 2
 
@@ -88,6 +90,8 @@ class DataPulseConfig:
             ai_sdk_token=ai_token,
             openai_api_key=openai_key,
             mysql=MySQLConfig.from_env(),
+            slack_bot_token=os.environ.get("SLACK_BOT_TOKEN", ""),
+            slack_channel_id=os.environ.get("SLACK_CHANNEL_ID", ""),
             poll_interval_seconds=int(
                 os.environ.get("DATAPULSE_POLL_INTERVAL_SECONDS", "30")
             ),

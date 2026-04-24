@@ -7,9 +7,17 @@ export interface IncidentSummary {
   blast_radius_size: number;
   root_cause_table: string;
   assigned_to: string | null;
+  acknowledged_by: string | null;
+  resolved_by: string | null;
+  slack_thread_url: string | null;
   created_at: string;
   has_report: boolean;
   has_recurring_failures: boolean;
+}
+
+export interface FaultyRow {
+  row_data: Record<string, string>;
+  reason: string;
 }
 
 export interface TestFailure {
@@ -20,6 +28,7 @@ export interface TestFailure {
   test_definition: string;
   result_message: string;
   timestamp: string;
+  faulty_rows: FaultyRow[];
 }
 
 export interface TestResultRecord {
@@ -79,6 +88,9 @@ export interface IncidentDetail {
   blast_radius: BlastRadius | null;
   report: IncidentReport | null;
   assigned_to: string | null;
+  acknowledged_by: string | null;
+  resolved_by: string | null;
+  slack_thread_url: string | null;
   resolution_note: string | null;
   acknowledged_at: string | null;
   resolved_at: string | null;

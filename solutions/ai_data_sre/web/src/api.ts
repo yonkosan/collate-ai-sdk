@@ -23,19 +23,22 @@ export const api = {
   runPipeline: () => fetchJSON<PipelineResponse>('/pipeline/run', { method: 'POST' }),
   listIncidents: () => fetchJSON<IncidentSummary[]>('/incidents'),
   getIncident: (id: string) => fetchJSON<IncidentDetail>(`/incidents/${id}`),
-  acknowledgeIncident: (id: string) =>
-    fetchJSON<{ status: string }>(`/incidents/${id}/ack`, { method: 'PUT', body: '{}' }),
+  acknowledgeIncident: (id: string, acknowledgedBy = 'admin') =>
+    fetchJSON<{ status: string }>(`/incidents/${id}/ack`, {
+      method: 'PUT',
+      body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
+    }),
   assignIncident: (id: string, assignee: string) =>
     fetchJSON<{ status: string }>(`/incidents/${id}/assign`, {
       method: 'PUT',
       body: JSON.stringify({ assignee }),
     }),
-  resolveIncident: (id: string, resolutionNote: string) =>
+  resolveIncident: (id: string, resolutionNote: string, resolvedBy = 'admin') =>
     fetchJSON<{ status: string }>(`/incidents/${id}/resolve`, {
       method: 'PUT',
-      body: JSON.stringify({ resolution_note: resolutionNote }),
+      body: JSON.stringify({ resolution_note: resolutionNote, resolved_by: resolvedBy }),
     }),
-  listUsers: () => fetchJSON<UserInfo[]>('/users'),
+  listUsers: (q = '') => fetchJSON<UserInfo[]>(`/users${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   listTeams: () => fetchJSON<UserInfo[]>('/teams'),
   getOmLink: (entityType: string, fqn: string) =>
     fetchJSON<{ link: string }>(`/om/link/${entityType}/${fqn}`),

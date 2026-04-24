@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from core.config import DataPulseConfig
 from core.models import Incident, IncidentStatus
+from core.slack_notifier import SlackNotifier
 
 logger = logging.getLogger("datapulse.api")
 
@@ -48,6 +49,7 @@ app.add_middleware(
 # In-memory incident store (populated after pipeline run)
 _incidents: Dict[str, Incident] = {}
 _config: Optional[DataPulseConfig] = None
+_slack: Optional[SlackNotifier] = None
 
 
 def _get_config() -> DataPulseConfig:
@@ -55,6 +57,13 @@ def _get_config() -> DataPulseConfig:
     if _config is None:
         _config = DataPulseConfig.from_env()
     return _config
+
+
+def _get_slack() -> SlackNotifier:
+    global _slack
+    if _slack is None:
+        _slack = SlackNotifier(_get_config())
+    return _slack
 
 
 # ─── Request/Response models ──────────────────────────────────────────────
@@ -67,7 +76,7 @@ class PipelineResponse(BaseModel):
 
 
 class AckRequest(BaseModel):
-    pass
+    acknowledged_by: str = "admin"
 
 
 class AssignRequest(BaseModel):
@@ -76,6 +85,7 @@ class AssignRequest(BaseModel):
 
 class ResolveRequest(BaseModel):
     resolution_note: str
+    resolved_by: str = "admin"
 
 
 class IncidentSummary(BaseModel):
@@ -87,6 +97,9 @@ class IncidentSummary(BaseModel):
     blast_radius_size: int
     root_cause_table: str
     assigned_to: Optional[str]
+    acknowledged_by: Optional[str]
+    resolved_by: Optional[str]
+    slack_thread_url: Optional[str]
     created_at: str
     has_report: bool
     has_recurring_failures: bool
@@ -111,6 +124,9 @@ def _incident_to_summary(inc: Incident) -> IncidentSummary:
         blast_radius_size=br.total_affected_assets if br else 0,
         root_cause_table=br.root_cause_table if br else "Unknown",
         assigned_to=inc.assigned_to,
+        acknowledged_by=inc.acknowledged_by,
+        resolved_by=inc.resolved_by,
+        slack_thread_url=inc.slack_thread_url,
         created_at=inc.created_at.isoformat(),
         has_report=inc.report is not None,
         has_recurring_failures=any(h.is_recurring for h in inc.failure_histories),
@@ -166,7 +182,7 @@ def get_incident(incident_id: str):
 
 
 @app.put("/api/incidents/{incident_id}/ack")
-def acknowledge_incident(incident_id: str):
+def acknowledge_incident(incident_id: str, body: AckRequest):
     """Acknowledge an incident."""
     inc = _incidents.get(incident_id)
     if not inc:
@@ -174,12 +190,25 @@ def acknowledge_incident(incident_id: str):
 
     inc.transition(IncidentStatus.ACKNOWLEDGED)
     inc.acknowledged_at = datetime.now(timezone.utc)
-    return {"status": "acknowledged", "incident_id": incident_id}
+    inc.acknowledged_by = body.acknowledged_by
+
+    # Slack update
+    slack = _get_slack()
+    slack.post_acknowledged(inc, body.acknowledged_by)
+
+    # OM hybrid — update test case incident status
+    _push_om_incident_status(inc, "Ack")
+
+    return {
+        "status": "acknowledged",
+        "incident_id": incident_id,
+        "acknowledged_by": body.acknowledged_by,
+    }
 
 
 @app.put("/api/incidents/{incident_id}/assign")
 def assign_incident(incident_id: str, body: AssignRequest):
-    """Assign an incident to a user/team and create a task in OpenMetadata."""
+    """Assign an incident to a user/team."""
     inc = _incidents.get(incident_id)
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -187,28 +216,12 @@ def assign_incident(incident_id: str, body: AssignRequest):
     inc.assigned_to = body.assignee
     inc.updated_at = datetime.now(timezone.utc)
 
-    # Also update the test case incident status in OpenMetadata
-    config = _get_config()
-    try:
-        with httpx.Client(
-            base_url=config.openmetadata_host,
-            headers=config.api_headers,
-            timeout=10.0,
-        ) as client:
-            # Find the first test case from the incident's failures
-            if inc.failures:
-                test_fqn = inc.failures[0].test_case_name
-                # Get test case to find its state ID
-                resp = client.get(
-                    f"/api/v1/dataQuality/testCases/name/{test_fqn}",
-                    params={"fields": "incidentId"},
-                )
-                if resp.status_code == 200:
-                    logger.info(
-                        "Updated OM test case incident status for %s", test_fqn
-                    )
-    except Exception as exc:
-        logger.warning("Failed to update OM incident status: %s", exc)
+    # Slack update
+    slack = _get_slack()
+    slack.post_assigned(inc, body.assignee)
+
+    # OM hybrid — update test case incident status
+    _push_om_incident_status(inc, "Assigned")
 
     return {
         "status": "assigned",
@@ -226,17 +239,27 @@ def resolve_incident(incident_id: str, body: ResolveRequest):
 
     inc.transition(IncidentStatus.RESOLVED)
     inc.resolution_note = body.resolution_note
+    inc.resolved_by = body.resolved_by
     inc.resolved_at = datetime.now(timezone.utc)
+
+    # Slack update
+    slack = _get_slack()
+    slack.post_resolved(inc, body.resolved_by, body.resolution_note)
+
+    # OM hybrid — update test case incident status
+    _push_om_incident_status(inc, "Resolved")
+
     return {
         "status": "resolved",
         "incident_id": incident_id,
+        "resolved_by": body.resolved_by,
         "resolution_note": body.resolution_note,
     }
 
 
 @app.get("/api/users", response_model=List[UserInfo])
-def list_users():
-    """Proxy to OpenMetadata to list users for assignment."""
+def list_users(q: str = ""):
+    """Proxy to OpenMetadata to list/search users for assignment."""
     config = _get_config()
     try:
         with httpx.Client(
@@ -244,7 +267,10 @@ def list_users():
             headers=config.api_headers,
             timeout=10.0,
         ) as client:
-            resp = client.get("/api/v1/users", params={"limit": 50})
+            params: dict = {"limit": 50}
+            if q:
+                params["name"] = f"*{q}*"
+            resp = client.get("/api/v1/users", params=params)
             resp.raise_for_status()
             data = resp.json()
             users = []
@@ -302,3 +328,40 @@ def get_app_config():
     """Return frontend configuration."""
     config = _get_config()
     return {"om_base_url": config.openmetadata_host}
+
+
+# ─── OM Hybrid helpers ──────────────────────────────────────────────────
+
+
+def _push_om_incident_status(inc: Incident, status_label: str) -> None:
+    """Best-effort push of incident status to OM testCaseIncidentStatus API."""
+    config = _get_config()
+    if not inc.failures:
+        return
+    try:
+        with httpx.Client(
+            base_url=config.openmetadata_host,
+            headers=config.api_headers,
+            timeout=10.0,
+        ) as client:
+            test_id = inc.failures[0].test_case_id
+            resp = client.get(
+                f"/api/v1/dataQuality/testCases/{test_id}",
+                params={"fields": "incidentId"},
+            )
+            if resp.status_code == 200:
+                tc_data = resp.json()
+                incident_id = tc_data.get("incidentId")
+                if incident_id:
+                    client.put(
+                        f"/api/v1/dataQuality/testCases/testCaseIncidentStatus/{incident_id}",
+                        json={
+                            "testCaseResolutionStatusType": status_label,
+                            "testCaseResolutionStatusDetails": {
+                                "resolvedBy": {"name": "admin", "type": "user"},
+                            },
+                        },
+                    )
+                    logger.info("Pushed OM incident status '%s' for test %s", status_label, test_id)
+    except Exception as exc:
+        logger.warning("Failed to push OM incident status: %s", exc)

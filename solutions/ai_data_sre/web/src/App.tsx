@@ -2,9 +2,11 @@ import { useCallback, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  CheckCircle2,
   Play,
   RefreshCw,
   Shield,
+  UserCheck,
 } from 'lucide-react';
 import { api } from './api';
 import type { IncidentDetail, IncidentSummary } from './types';
@@ -81,6 +83,16 @@ export default function App() {
   const criticalCount = incidents.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
+
+  const activeIncidents = incidents.filter(
+    (i) => i.status === 'detected' || i.status === 'investigating' || i.status === 'reported'
+  );
+  const assignedIncidents = incidents.filter(
+    (i) => i.status === 'acknowledged' || i.assigned_to
+  );
+  const resolvedIncidents = incidents.filter(
+    (i) => i.status === 'resolved'
+  );
 
   return (
     <div className="min-h-screen bg-pulse-bg">
@@ -183,17 +195,48 @@ export default function App() {
                 <p>No data quality incidents detected.</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-200 mb-4">
-                  Active Incidents
-                </h2>
-                {incidents.map((inc) => (
-                  <IncidentCard
-                    key={inc.id}
-                    incident={inc}
-                    onClick={() => openIncident(inc.id)}
+              <div className="space-y-8">
+                {/* Block 1: Active / New Incidents */}
+                {activeIncidents.length > 0 && (
+                  <IncidentSection
+                    title="Active Incidents"
+                    icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
+                    count={activeIncidents.length}
+                    accentColor="border-red-500/40"
+                    incidents={activeIncidents}
+                    onOpen={openIncident}
                   />
-                ))}
+                )}
+
+                {/* Block 2: Assigned / Acknowledged */}
+                {assignedIncidents.length > 0 && (
+                  <IncidentSection
+                    title="Assigned / In Progress"
+                    icon={<UserCheck className="w-5 h-5 text-yellow-400" />}
+                    count={assignedIncidents.length}
+                    accentColor="border-yellow-500/40"
+                    incidents={assignedIncidents}
+                    onOpen={openIncident}
+                  />
+                )}
+
+                {/* Block 3: Resolved */}
+                {resolvedIncidents.length > 0 && (
+                  <IncidentSection
+                    title="Resolved"
+                    icon={<CheckCircle2 className="w-5 h-5 text-green-400" />}
+                    count={resolvedIncidents.length}
+                    accentColor="border-green-500/40"
+                    incidents={resolvedIncidents}
+                    onOpen={openIncident}
+                  />
+                )}
+
+                {activeIncidents.length === 0 && assignedIncidents.length === 0 && resolvedIncidents.length === 0 && (
+                  <div className="text-center py-12 text-gray-400">
+                    <p>No incidents match current filters.</p>
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -207,6 +250,43 @@ export default function App() {
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function IncidentSection({
+  title,
+  icon,
+  count,
+  accentColor,
+  incidents,
+  onOpen,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  count: number;
+  accentColor: string;
+  incidents: IncidentSummary[];
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <div className={`border-l-2 ${accentColor} pl-4`}>
+      <div className="flex items-center gap-2 mb-3">
+        {icon}
+        <h2 className="text-lg font-semibold text-gray-200">{title}</h2>
+        <span className="text-xs bg-pulse-card border border-pulse-border rounded-full px-2 py-0.5 text-gray-400">
+          {count}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {incidents.map((inc) => (
+          <IncidentCard
+            key={inc.id}
+            incident={inc}
+            onClick={() => onOpen(inc.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   ChevronRight,
   Clock,
   Database,
+  MessageSquare,
   RefreshCw,
   User,
 } from 'lucide-react';
@@ -117,6 +118,19 @@ export function IncidentCard({ incident, onClick }: IncidentCardProps) {
               <Clock className="w-3.5 h-3.5" />
               {new Date(incident.created_at).toLocaleTimeString()}
             </span>
+            {incident.slack_thread_url && (
+              <a
+                href={incident.slack_thread_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
+                title="View Slack thread"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Slack
+              </a>
+            )}
           </div>
         </div>
 

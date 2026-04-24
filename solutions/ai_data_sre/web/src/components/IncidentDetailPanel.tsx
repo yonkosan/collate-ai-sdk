@@ -7,6 +7,8 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
+  MessageSquare,
+  Search,
   Shield,
   User,
   UserPlus,
@@ -34,6 +36,7 @@ interface Props {
 export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [showAssignDropdown, setShowAssignDropdown] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -135,16 +138,41 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
           </button>
           {showAssignDropdown && (
             <div className="absolute top-full mt-1 left-0 w-56 bg-pulse-card border border-pulse-border rounded-lg shadow-xl z-10 py-1">
-              {users.map((u) => (
-                <button
-                  key={u.name}
-                  onClick={() => handleAssign(u.name)}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-pulse-border/50 flex items-center gap-2"
-                >
-                  <User className="w-3.5 h-3.5 text-gray-500" />
-                  {u.display_name}
-                </button>
-              ))}
+              <div className="px-3 py-2 border-b border-pulse-border">
+                <div className="flex items-center gap-2 bg-pulse-bg border border-pulse-border rounded px-2 py-1">
+                  <Search className="w-3 h-3 text-gray-500" />
+                  <input
+                    type="text"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Search users…"
+                    className="bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none w-full"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {users
+                  .filter(
+                    (u) =>
+                      !userSearch ||
+                      u.display_name.toLowerCase().includes(userSearch.toLowerCase()) ||
+                      u.name.toLowerCase().includes(userSearch.toLowerCase())
+                  )
+                  .map((u) => (
+                    <button
+                      key={u.name}
+                      onClick={() => {
+                        handleAssign(u.name);
+                        setUserSearch('');
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-pulse-border/50 flex items-center gap-2"
+                    >
+                      <User className="w-3.5 h-3.5 text-gray-500" />
+                      {u.display_name}
+                    </button>
+                  ))}
+              </div>
             </div>
           )}
         </div>
@@ -169,6 +197,18 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
           >
             <ExternalLink className="w-4 h-4" />
             View in OpenMetadata
+          </a>
+        )}
+
+        {incident.slack_thread_url && (
+          <a
+            href={incident.slack_thread_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 text-sm border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Slack Thread
           </a>
         )}
       </div>
@@ -316,6 +356,43 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
                     {f.column ? ` → ${f.column}` : ''}
                   </p>
                   <p className="text-xs text-red-300">{f.result_message}</p>
+
+                  {/* Faulty rows snippet */}
+                  {f.faulty_rows && f.faulty_rows.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="text-xs text-yellow-400 cursor-pointer hover:text-yellow-300">
+                        {f.faulty_rows.length} faulty row(s)
+                      </summary>
+                      <div className="mt-1 overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-500 border-b border-pulse-border">
+                              {Object.keys(f.faulty_rows[0]?.row_data ?? {}).map((col) => (
+                                <th key={col} className="text-left py-1 pr-2 font-medium">
+                                  {col}
+                                </th>
+                              ))}
+                              <th className="text-left py-1 font-medium">reason</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {f.faulty_rows.map((row, idx) => (
+                              <tr key={idx} className="text-gray-300 border-b border-pulse-border/50">
+                                {Object.values(row.row_data).map((val, ci) => (
+                                  <td key={ci} className="py-1 pr-2 truncate max-w-[100px]">
+                                    {val}
+                                  </td>
+                                ))}
+                                <td className="py-1 text-red-300 truncate max-w-[120px]">
+                                  {row.reason}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
@@ -369,6 +446,21 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
             </section>
           )}
 
+          {/* Acknowledged info */}
+          {incident.acknowledged_by && incident.acknowledged_at && (
+            <section className="bg-pulse-card border border-purple-500/20 rounded-lg p-5">
+              <h4 className="text-sm font-semibold text-purple-400 mb-2">
+                ✓ Acknowledged
+              </h4>
+              <p className="text-sm text-gray-300">
+                by <span className="text-white font-medium">{incident.acknowledged_by}</span>
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {new Date(incident.acknowledged_at).toLocaleString()}
+              </p>
+            </section>
+          )}
+
           {/* Resolution info */}
           {incident.resolved_at && (
             <section className="bg-pulse-card border border-green-500/20 rounded-lg p-5">
@@ -378,7 +470,12 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
               <p className="text-sm text-gray-300">
                 {incident.resolution_note}
               </p>
-              <p className="text-xs text-gray-500 mt-2">
+              {incident.resolved_by && (
+                <p className="text-xs text-gray-400 mt-2">
+                  by <span className="text-white font-medium">{incident.resolved_by}</span>
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
                 {new Date(incident.resolved_at).toLocaleString()}
               </p>
             </section>

@@ -26,6 +26,7 @@ from core.investigator import Investigator
 from core.models import Incident
 from core.narrator import Narrator
 from core.sentinel import Sentinel
+from core.slack_notifier import SlackNotifier
 
 console = Console()
 
@@ -38,6 +39,7 @@ class Orchestrator:
         self._sentinel = Sentinel(config)
         self._investigator = Investigator(config)
         self._narrator = Narrator(config)
+        self._slack = SlackNotifier(config)
 
     @classmethod
     def from_env(cls) -> Orchestrator:
@@ -64,6 +66,14 @@ class Orchestrator:
         # Phase 3: Narrate
         for incident in incidents:
             self._narrator.narrate(incident)
+
+        # Phase 4: Notify Slack — one thread per incident
+        for incident in incidents:
+            thread_ts = self._slack.post_new_incident(incident)
+            if thread_ts:
+                incident.slack_thread_ts = thread_ts
+                incident.slack_thread_url = self._slack.build_thread_url(thread_ts)
+                self._slack.post_ai_report(incident)
 
         # Final summary
         self._print_dashboard(incidents)
