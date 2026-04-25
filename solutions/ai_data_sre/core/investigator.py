@@ -82,8 +82,9 @@ class Investigator:
         root_cause_fqn = upstream_chain[-1].fqn if upstream_chain else start_table_fqn
 
         # Trace column upstream through column-level lineage
+        fail_message = incident.failures[0].result_message or ""
         root_cause_column = self._trace_column_upstream(
-            lineage, start_column, start_table_fqn, root_cause_fqn
+            lineage, start_column, start_table_fqn, root_cause_fqn, fail_message
         )
 
         # Walk downstream from root cause to find full impact
@@ -227,14 +228,18 @@ class Investigator:
         column_name: Optional[str],
         start_table_fqn: str,
         root_cause_fqn: str,
+        fail_message: str = "",
     ) -> Optional[str]:
         """Trace a column through column-level lineage to find the root cause column.
 
         If the root cause table is the same as the start table, returns the
         original column unchanged.  Otherwise, walks upstream edges that carry
         ``columnsLineage`` metadata and resolves the source column name at the
-        root cause table.  Falls back to ``None`` when no mapping is found
-        (e.g. the column is computed and has no direct ancestor).
+        root cause table.
+
+        For computed columns (no direct column lineage ancestor), falls back to
+        checking which source columns from the root cause table are mentioned
+        in the failure message, since those are the most likely contributors.
         """
         if not column_name:
             return None
@@ -243,6 +248,8 @@ class Investigator:
 
         # Build a column-level reverse map: (to_entity_id, to_col_fqn) → from_col_fqn
         col_map: Dict[Tuple[str, str], str] = {}
+        # Also collect all source columns from the root cause table
+        root_cause_source_cols: List[str] = []
         for edge in lineage.get("upstreamEdges", []):
             to_id = edge["toEntity"]
             for col_edge in edge.get("columnsLineage", []):
@@ -250,10 +257,15 @@ class Investigator:
                 from_cols = col_edge.get("fromColumns", [])
                 if not from_cols:
                     continue
-                # Each toColumn may map to one or more fromColumns
-                from_col = from_cols[0]  # take the first source
+                from_col = from_cols[0]
                 for to_col in to_cols:
                     col_map[(to_id, to_col)] = from_col
+                # Track columns originating from root cause table
+                for fc in from_cols:
+                    if fc.startswith(root_cause_fqn + "."):
+                        col_name = fc.rsplit(".", 1)[-1]
+                        if col_name not in root_cause_source_cols:
+                            root_cause_source_cols.append(col_name)
 
         # Walk the upstream chain, tracing the column at each hop
         current_col_fqn = f"{start_table_fqn}.{column_name}"
@@ -273,7 +285,6 @@ class Investigator:
             key = (current_id, current_col_fqn)
             if key in col_map:
                 current_col_fqn = col_map[key]
-                # Resolve the parent entity for the next hop
                 parent_fqn = current_col_fqn.rsplit(".", 1)[0]
                 current_id = fqn_to_id.get(parent_fqn)
             else:
@@ -281,10 +292,25 @@ class Investigator:
 
         # Extract just the column name from the FQN
         resolved = current_col_fqn.rsplit(".", 1)[-1]
-        if resolved == column_name and root_cause_fqn != start_table_fqn:
-            # Column didn't trace — it's likely computed. Return None.
-            return None
-        return resolved
+        if resolved != column_name or root_cause_fqn == start_table_fqn:
+            return resolved
+
+        # Column didn't trace (computed). Check if the failure message
+        # mentions any source column from the root cause table.
+        root_table_short = root_cause_fqn.rsplit(".", 1)[-1]
+        msg_lower = fail_message.lower()
+        for src_col in root_cause_source_cols:
+            # Match "raw_orders.order_date" or just "order_date" in the message
+            if (
+                f"{root_table_short}.{src_col}".lower() in msg_lower
+                or src_col.lower() in msg_lower
+            ):
+                return src_col
+
+        # Last resort: return the first source column from the root cause table
+        if root_cause_source_cols:
+            return root_cause_source_cols[0]
+        return None
 
     def _walk_downstream(self, lineage: dict, entity_id: str) -> List[AffectedAsset]:
         """Walk downstream edges to find all impacted assets."""
