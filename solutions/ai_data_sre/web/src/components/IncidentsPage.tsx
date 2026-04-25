@@ -102,15 +102,21 @@ export function IncidentsPage({ currentIncidents, pastIncidents, onOpen }: Incid
             const shortTable = inc.root_cause_table.split('.').pop() ?? inc.root_cause_table;
             const isPast = inc.id.startsWith('hist-');
 
+            const isResolved = inc.status === 'resolved';
+
             return (
               <button
                 key={inc.id}
                 onClick={() => !isPast && onOpen(inc.id)}
                 disabled={isPast}
-                className={`w-full text-left rounded-xl border ${sev.border} bg-surface-elevated p-4 transition-all group ${
+                className={`w-full text-left rounded-xl border-l-[3px] border p-4 transition-all group ${
+                  isResolved
+                    ? 'border-l-emerald-500 border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10'
+                    : 'border-l-red-500 border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
+                } ${
                   isPast
                     ? 'opacity-75 cursor-default'
-                    : 'hover:border-primary-400/40 hover:shadow-card-hover cursor-pointer'
+                    : 'hover:shadow-card-hover cursor-pointer'
                 }`}
               >
                 <div className="flex items-center gap-3">
