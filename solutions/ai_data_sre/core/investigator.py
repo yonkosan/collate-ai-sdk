@@ -81,6 +81,11 @@ class Investigator:
         upstream_chain = self._walk_upstream(lineage, entity_id)
         root_cause_fqn = upstream_chain[-1].fqn if upstream_chain else start_table_fqn
 
+        # Trace column upstream through column-level lineage
+        root_cause_column = self._trace_column_upstream(
+            lineage, start_column, start_table_fqn, root_cause_fqn
+        )
+
         # Walk downstream from root cause to find full impact
         root_lineage = self._fetch_lineage(root_cause_fqn)
         if root_lineage:
@@ -98,7 +103,7 @@ class Investigator:
 
         blast_radius = BlastRadius(
             root_cause_table=root_cause_fqn,
-            root_cause_column=start_column,
+            root_cause_column=root_cause_column,
             upstream_chain=upstream_chain,
             downstream_impact=downstream_impact,
             total_affected_assets=len(all_assets) + 1,  # +1 for the incident table
@@ -215,6 +220,71 @@ class Investigator:
             depth += 1
 
         return chain
+
+    def _trace_column_upstream(
+        self,
+        lineage: dict,
+        column_name: Optional[str],
+        start_table_fqn: str,
+        root_cause_fqn: str,
+    ) -> Optional[str]:
+        """Trace a column through column-level lineage to find the root cause column.
+
+        If the root cause table is the same as the start table, returns the
+        original column unchanged.  Otherwise, walks upstream edges that carry
+        ``columnsLineage`` metadata and resolves the source column name at the
+        root cause table.  Falls back to ``None`` when no mapping is found
+        (e.g. the column is computed and has no direct ancestor).
+        """
+        if not column_name:
+            return None
+        if root_cause_fqn == start_table_fqn:
+            return column_name
+
+        # Build a column-level reverse map: (to_entity_id, to_col_fqn) → from_col_fqn
+        col_map: Dict[Tuple[str, str], str] = {}
+        for edge in lineage.get("upstreamEdges", []):
+            to_id = edge["toEntity"]
+            for col_edge in edge.get("columnsLineage", []):
+                to_cols = col_edge.get("toColumns", [])
+                from_cols = col_edge.get("fromColumns", [])
+                if not from_cols:
+                    continue
+                # Each toColumn may map to one or more fromColumns
+                from_col = from_cols[0]  # take the first source
+                for to_col in to_cols:
+                    col_map[(to_id, to_col)] = from_col
+
+        # Walk the upstream chain, tracing the column at each hop
+        current_col_fqn = f"{start_table_fqn}.{column_name}"
+        entity_id = lineage.get("entity", {}).get("id", "")
+
+        # Build id → fqn lookup
+        fqn_to_id: Dict[str, str] = {}
+        for nid, ndata in self._node_cache.items():
+            fqn_to_id[ndata.get("fqn", "")] = nid
+        fqn_to_id[start_table_fqn] = entity_id
+
+        # Traverse upstream following column lineage
+        visited: Set[str] = set()
+        current_id = entity_id
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            key = (current_id, current_col_fqn)
+            if key in col_map:
+                current_col_fqn = col_map[key]
+                # Resolve the parent entity for the next hop
+                parent_fqn = current_col_fqn.rsplit(".", 1)[0]
+                current_id = fqn_to_id.get(parent_fqn)
+            else:
+                break
+
+        # Extract just the column name from the FQN
+        resolved = current_col_fqn.rsplit(".", 1)[-1]
+        if resolved == column_name and root_cause_fqn != start_table_fqn:
+            # Column didn't trace — it's likely computed. Return None.
+            return None
+        return resolved
 
     def _walk_downstream(self, lineage: dict, entity_id: str) -> List[AffectedAsset]:
         """Walk downstream edges to find all impacted assets."""
