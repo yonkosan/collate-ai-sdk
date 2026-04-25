@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
   Database,
   GitBranch,
   Loader2,
@@ -9,7 +8,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { api } from '../api';
-import type { AffectedAsset, BlastRadius, IncidentDetail, IncidentSummary } from '../types';
+import type { AffectedAsset, IncidentDetail, IncidentSummary } from '../types';
 import { SEVERITY_CONFIG, DEFAULT_SEVERITY_CONFIG } from '../data/constants';
 
 /* ─── Node model for the unified graph ───────────────────────────────── */
