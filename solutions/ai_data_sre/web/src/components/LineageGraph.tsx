@@ -78,17 +78,18 @@ export function LineageGraph({ blastRadius, omBaseUrl }: Props) {
         ))}
       </div>
 
-      <div className="flex justify-center gap-6 mt-4 text-xs text-gray-500">
+      {/* Legend */}
+      <div className="flex justify-center gap-6 mt-4 text-xs text-content-muted">
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-blue-500/30 border border-blue-500/50" />
+          <span className="w-3 h-3 rounded bg-secondary-500/30 border border-secondary-500/50" />
           Upstream
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-red-500/30 border border-red-500/50" />
+          <span className="w-3 h-3 rounded bg-danger/30 border border-danger/50" />
           Root Cause
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-orange-500/30 border border-orange-500/50" />
+          <span className="w-3 h-3 rounded bg-warning/30 border border-warning/50" />
           Downstream
         </span>
       </div>
@@ -114,9 +115,9 @@ function NodeBox({
   column?: string;
 }) {
   const styles = {
-    upstream: 'bg-blue-500/10 border-blue-500/40 hover:border-blue-400',
-    root: 'bg-red-500/15 border-red-500/50 hover:border-red-400 ring-2 ring-red-500/20',
-    downstream: 'bg-orange-500/10 border-orange-500/40 hover:border-orange-400',
+    upstream: 'bg-secondary-500/10 border-secondary-500/40 hover:border-secondary-400',
+    root: 'bg-danger/15 border-danger/50 hover:border-danger ring-2 ring-danger/20 shadow-glow',
+    downstream: 'bg-warning/10 border-warning/40 hover:border-warning',
   };
 
   return (
@@ -124,19 +125,19 @@ function NodeBox({
       href={`${omBaseUrl}/table/${fqn}`}
       target="_blank"
       rel="noopener noreferrer"
-      className={`block border rounded-lg p-3 min-w-[140px] text-center transition-colors ${styles[variant]}`}
+      className={`block border rounded-xl p-3 min-w-[140px] text-center transition-all hover:shadow-card ${styles[variant]}`}
     >
-      <p className="text-sm font-semibold text-white">{name}</p>
+      <p className="text-sm font-semibold text-content-primary">{name}</p>
       {column && (
-        <p className="text-xs text-red-300 mt-0.5">⚠ {column}</p>
+        <p className="text-xs text-danger mt-0.5">⚠ {column}</p>
       )}
       {tier && (
-        <span className="inline-block text-xs px-1.5 py-0.5 mt-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded">
+        <span className="inline-block text-xs px-1.5 py-0.5 mt-1 bg-primary-500/10 text-primary-400 border border-primary-500/20 rounded-lg">
           {tier.replace('Tier.', '')}
         </span>
       )}
       {owners.length > 0 && (
-        <p className="text-xs text-gray-500 mt-1">{owners.join(', ')}</p>
+        <p className="text-xs text-content-muted mt-1">{owners.join(', ')}</p>
       )}
     </a>
   );
@@ -144,9 +145,9 @@ function NodeBox({
 
 function Arrow() {
   return (
-    <div className="flex items-center text-gray-500">
-      <div className="w-8 h-px bg-gray-600" />
-      <svg viewBox="0 0 8 12" className="w-2 h-3 fill-gray-500">
+    <div className="flex items-center text-content-faint">
+      <div className="w-8 h-px bg-border-strong" />
+      <svg viewBox="0 0 8 12" className="w-2 h-3 fill-content-faint">
         <polygon points="0,0 8,6 0,12" />
       </svg>
     </div>
