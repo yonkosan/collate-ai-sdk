@@ -111,9 +111,11 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
       fullPath.push(failTableFqn);
     }
     for (let i = 0; i < fullPath.length - 1; i++) {
-      ensureNode(fullPath[i]);
-      ensureNode(fullPath[i + 1]);
-      addEdge(fullPath[i], fullPath[i + 1]);
+      const from = fullPath[i]!;
+      const to = fullPath[i + 1]!;
+      ensureNode(from);
+      ensureNode(to);
+      addEdge(from, to);
     }
 
     // Upstream nodes — register metadata
