@@ -8,6 +8,7 @@ import { api } from '../api';
 import type { IncidentDetail, IncidentSummary } from '../types';
 import { SEVERITY_CONFIG, DEFAULT_SEVERITY_CONFIG } from '../data/constants';
 import { LineageGraph } from './LineageGraph';
+import { UnifiedDAG } from './UnifiedDAG';
 
 interface Props {
   incidents: IncidentSummary[];
@@ -92,6 +93,12 @@ export function UnifiedLineagePage({ incidents }: Props) {
 
       {/* Per-incident lineage cards — scrollable */}
       <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1">
+        {/* Unified DAG — all incidents in one graph */}
+        {details.length > 0 && (
+          <UnifiedDAG details={details} omBaseUrl={omBaseUrl} />
+        )}
+
+        {/* Per-incident cards */}
         {details.map((detail) => {
           const sev = SEVERITY_CONFIG[detail.severity] ?? DEFAULT_SEVERITY_CONFIG;
           const assetCount = detail.blast_radius
