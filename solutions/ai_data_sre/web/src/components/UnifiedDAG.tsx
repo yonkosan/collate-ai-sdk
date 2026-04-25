@@ -1,17 +1,12 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IncidentDetail, BlastRadius } from '../types';
 
 /* ──────────────────────────────────────────────────────────────────────────
  *  UnifiedDAG — a single lineage graph built from ALL active incidents.
  *
- *  • Every table that appears in any incident's blast radius is a node.
- *  • Edges come from upstream_chain/downstream_impact relationships.
- *  • Tables where a DQ test failed are amber.
- *  • On hover over a failing table → its root-cause tables turn red and
- *    the path between them is highlighted, so engineers can see at a glance
- *    if one table is the root cause for multiple failures.
- *  • Root-cause tables always show a small badge counting how many
- *    incidents they are responsible for.
+ *  Nodes are positioned by topological layer (left → right) with SVG
+ *  bezier edges drawn between the actual connected tables, so the flow
+ *  reads:  raw_orders → staging_orders → fact_order_metrics → exec_dashboard_kpis
  * ────────────────────────────────────────────────────────────────────────── */
 
 interface Props {
@@ -24,23 +19,29 @@ interface Props {
 interface DAGNode {
   fqn: string;
   name: string;
-  /** Incident IDs where this table has a DQ failure */
   failingIncidents: string[];
-  /** Incident IDs where this table is the root cause */
   rootCauseFor: string[];
-  /** Incident titles for tooltip (keyed by incident ID) */
   incidentTitles: Record<string, string>;
-  /** Column responsible per incident */
   rootCauseColumns: Record<string, string>;
   tier: string | null;
   owners: string[];
   layer: number;
+  row: number;
 }
 
 interface DAGEdge {
-  from: string; // fqn
-  to: string;   // fqn
+  from: string;
+  to: string;
 }
+
+/* ── Layout constants ───────────────────────────────────────────────────── */
+
+const NODE_W = 152;
+const NODE_H = 58;
+const LAYER_GAP = 72;
+const ROW_GAP = 20;
+const PAD_X = 28;
+const PAD_Y = 40;
 
 /* ── Graph builder ──────────────────────────────────────────────────────── */
 
@@ -62,6 +63,7 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
         tier: null,
         owners: [],
         layer: 0,
+        row: 0,
       };
       nodeMap.set(fqn, node);
     }
@@ -71,6 +73,7 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
   };
 
   const addEdge = (from: string, to: string) => {
+    if (from === to) return;
     const key = `${from}→${to}`;
     if (!edgeSet.has(key)) {
       edgeSet.add(key);
@@ -82,7 +85,6 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
     const br: BlastRadius | null = detail.blast_radius;
     if (!br) continue;
 
-    // The table where the test failed (the start table of the incident)
     const failTableFqn = detail.failures?.[0]?.table_fqn;
     if (failTableFqn) {
       const failNode = ensureNode(failTableFqn);
@@ -92,7 +94,6 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
       failNode.incidentTitles[detail.id] = detail.title;
     }
 
-    // Root cause table
     const rootNode = ensureNode(br.root_cause_table);
     if (!rootNode.rootCauseFor.includes(detail.id)) {
       rootNode.rootCauseFor.push(detail.id);
@@ -102,11 +103,9 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
       rootNode.rootCauseColumns[detail.id] = br.root_cause_column;
     }
 
-    // Upstream chain: root_cause → ... → upstream[0] → failTable
-    // The chain is ordered from closest-to-fail to farthest (root cause excluded)
+    // Build path: root_cause → upstream (reversed) → failTable
     const upstreamFqns = br.upstream_chain.map((a) => a.fqn);
-    // Build edges: root_cause → last_upstream → ... → first_upstream → failTable
-    const fullPath = [br.root_cause_table, ...upstreamFqns.reverse()];
+    const fullPath = [br.root_cause_table, ...[...upstreamFqns].reverse()];
     if (failTableFqn && !fullPath.includes(failTableFqn)) {
       fullPath.push(failTableFqn);
     }
@@ -118,31 +117,23 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
       addEdge(from, to);
     }
 
-    // Upstream nodes — register metadata
     for (const asset of br.upstream_chain) {
       ensureNode(asset.fqn, asset.tier, asset.owners);
     }
 
-    // Downstream impact: failTable → downstream[0] → downstream[1] → ...
-    let prevFqn = failTableFqn ?? br.root_cause_table;
+    // Downstream: chain by depth
+    const downByDepth = new Map<number, string>();
+    const startFqn = failTableFqn ?? br.root_cause_table;
+    downByDepth.set(0, startFqn);
     for (const asset of br.downstream_impact) {
       const n = ensureNode(asset.fqn, asset.tier, asset.owners);
+      const prevFqn = downByDepth.get(asset.depth - 1) ?? startFqn;
       addEdge(prevFqn, n.fqn);
-      // For deeper downstream, chain by depth
-      if (asset.depth > 1) {
-        // find prev at depth-1
-        const prevAtDepth = br.downstream_impact.find(
-          (a) => a.depth === asset.depth - 1
-        );
-        if (prevAtDepth) {
-          addEdge(prevAtDepth.fqn, asset.fqn);
-        }
-      }
-      prevFqn = n.fqn;
+      downByDepth.set(asset.depth, n.fqn);
     }
   }
 
-  // Assign layers via topological sort (longest path from source)
+  // Longest-path topological layering
   const adjOut = new Map<string, string[]>();
   const inDeg = new Map<string, number>();
   for (const node of nodeMap.values()) {
@@ -153,8 +144,6 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
     adjOut.get(e.from)?.push(e.to);
     inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1);
   }
-
-  // Kahn's algorithm for layering
   const queue: string[] = [];
   for (const [fqn, deg] of inDeg.entries()) {
     if (deg === 0) queue.push(fqn);
@@ -171,128 +160,117 @@ function buildDAG(details: IncidentDetail[]): { nodes: DAGNode[]; edges: DAGEdge
     }
   }
 
-  const nodes = Array.from(nodeMap.values());
-  return { nodes, edges };
+  // Row positions within each layer (sorted by name for stability)
+  const layerMap = new Map<number, DAGNode[]>();
+  for (const node of nodeMap.values()) {
+    const arr = layerMap.get(node.layer) ?? [];
+    arr.push(node);
+    layerMap.set(node.layer, arr);
+  }
+  for (const [, layerNodes] of layerMap) {
+    layerNodes.sort((a, b) => a.name.localeCompare(b.name));
+    layerNodes.forEach((n, i) => { n.row = i; });
+  }
+
+  return { nodes: Array.from(nodeMap.values()), edges };
 }
 
 /* ── Component ──────────────────────────────────────────────────────────── */
 
 export function UnifiedDAG({ details, omBaseUrl }: Props) {
   const [hoveredFqn, setHoveredFqn] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const { nodes, edges } = useMemo(() => buildDAG(details), [details]);
 
-  // Group nodes by layer for rendering
-  const layers = useMemo(() => {
-    const map = new Map<number, DAGNode[]>();
-    for (const node of nodes) {
-      const arr = map.get(node.layer) ?? [];
-      arr.push(node);
-      map.set(node.layer, arr);
+  // Compute canvas dimensions and node positions
+  const { canvasW, canvasH, positions } = useMemo(() => {
+    // Gather layer sizes
+    const layerSizes = new Map<number, number>();
+    let maxLayer = 0;
+    for (const n of nodes) {
+      layerSizes.set(n.layer, (layerSizes.get(n.layer) ?? 0) + 1);
+      maxLayer = Math.max(maxLayer, n.layer);
     }
-    return Array.from(map.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([, layerNodes]) => layerNodes);
+    const maxRows = Math.max(1, ...layerSizes.values());
+    const totalMaxH = maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
+
+    const w = PAD_X * 2 + (maxLayer + 1) * NODE_W + maxLayer * LAYER_GAP;
+    const h = PAD_Y + totalMaxH + 20;
+
+    const pos = new Map<string, { x: number; y: number }>();
+    for (const node of nodes) {
+      const lSize = layerSizes.get(node.layer) ?? 1;
+      const layerH = lSize * NODE_H + (lSize - 1) * ROW_GAP;
+      const offsetY = (totalMaxH - layerH) / 2;
+      pos.set(node.fqn, {
+        x: PAD_X + node.layer * (NODE_W + LAYER_GAP),
+        y: PAD_Y + offsetY + node.row * (NODE_H + ROW_GAP),
+      });
+    }
+
+    return { canvasW: w, canvasH: h, positions: pos, maxLayer };
   }, [nodes]);
 
-  // When hovering a DQ-failing table, compute which tables to highlight red
+  // Hover: which nodes to highlight
   const highlighted = useMemo<Set<string>>(() => {
     if (!hoveredFqn) return new Set();
     const hoveredNode = nodes.find((n) => n.fqn === hoveredFqn);
     if (!hoveredNode) return new Set();
 
     const set = new Set<string>();
-
-    // If hovering a failing table: highlight its root-cause tables
     if (hoveredNode.failingIncidents.length > 0) {
-      for (const incidentId of hoveredNode.failingIncidents) {
-        for (const node of nodes) {
-          if (node.rootCauseFor.includes(incidentId)) {
-            set.add(node.fqn);
-          }
+      for (const incId of hoveredNode.failingIncidents) {
+        for (const n of nodes) {
+          if (n.rootCauseFor.includes(incId)) set.add(n.fqn);
         }
       }
     }
-
-    // If hovering a root-cause table: highlight the tables it causes to fail
     if (hoveredNode.rootCauseFor.length > 0) {
-      for (const incidentId of hoveredNode.rootCauseFor) {
-        for (const node of nodes) {
-          if (node.failingIncidents.includes(incidentId)) {
-            set.add(node.fqn);
-          }
+      for (const incId of hoveredNode.rootCauseFor) {
+        for (const n of nodes) {
+          if (n.failingIncidents.includes(incId)) set.add(n.fqn);
         }
       }
     }
-
     return set;
   }, [hoveredFqn, nodes]);
 
-  // Highlighted edges: all edges on paths between hovered and highlighted nodes
+  // Highlighted edges: paths between hovered and highlighted
   const highlightedEdges = useMemo<Set<string>>(() => {
     if (!hoveredFqn || highlighted.size === 0) return new Set();
+    const relevant = new Set([hoveredFqn, ...highlighted]);
 
-    // BFS/DFS to find edges on paths between root causes and failing tables
-    const relevantNodes = new Set([hoveredFqn, ...highlighted]);
-
-    // Build adjacency in both directions
     const adjFwd = new Map<string, string[]>();
-    const adjRev = new Map<string, string[]>();
     for (const e of edges) {
-      const fwd = adjFwd.get(e.from) ?? [];
-      fwd.push(e.to);
-      adjFwd.set(e.from, fwd);
-      const rev = adjRev.get(e.to) ?? [];
-      rev.push(e.from);
-      adjRev.set(e.to, rev);
-    }
-
-    // Find all nodes reachable between relevant nodes
-    const edgesOnPath = new Set<string>();
-    for (const src of relevantNodes) {
-      // BFS forward from each relevant node
-      const visited = new Set<string>();
-      const q = [src];
-      visited.add(src);
-      while (q.length > 0) {
-        const cur = q.shift()!;
-        for (const next of adjFwd.get(cur) ?? []) {
-          if (!visited.has(next)) {
-            visited.add(next);
-            q.push(next);
-            // If this reaches another relevant node, mark the entire path
-            if (relevantNodes.has(next)) {
-              edgesOnPath.add(`${cur}→${next}`);
-            }
-          }
-          edgesOnPath.add(`${cur}→${next}`);
-        }
-      }
-    }
-
-    // Filter to only edges where both endpoints are reachable from relevant nodes
-    const reachableFromRelevant = new Set<string>();
-    for (const src of relevantNodes) {
-      const visited = new Set<string>();
-      const q = [src];
-      visited.add(src);
-      while (q.length > 0) {
-        const cur = q.shift()!;
-        reachableFromRelevant.add(cur);
-        for (const next of adjFwd.get(cur) ?? []) {
-          if (!visited.has(next)) { visited.add(next); q.push(next); }
-        }
-        for (const prev of adjRev.get(cur) ?? []) {
-          if (!visited.has(prev)) { visited.add(prev); q.push(prev); }
-        }
-      }
+      const arr = adjFwd.get(e.from) ?? [];
+      arr.push(e.to);
+      adjFwd.set(e.from, arr);
     }
 
     const result = new Set<string>();
-    for (const e of edges) {
-      if (reachableFromRelevant.has(e.from) && reachableFromRelevant.has(e.to)) {
-        if (relevantNodes.has(e.from) || relevantNodes.has(e.to)) {
-          result.add(`${e.from}→${e.to}`);
+    for (const src of relevant) {
+      // BFS forward, recording parent pointers
+      const parent = new Map<string, string | null>();
+      parent.set(src, null);
+      const q = [src];
+      while (q.length > 0) {
+        const cur = q.shift()!;
+        for (const next of adjFwd.get(cur) ?? []) {
+          if (!parent.has(next)) {
+            parent.set(next, cur);
+            q.push(next);
+          }
+        }
+      }
+      // Trace back from each reached relevant node
+      for (const tgt of relevant) {
+        if (tgt === src || !parent.has(tgt)) continue;
+        let cur: string | null = tgt;
+        while (cur !== null && cur !== src) {
+          const p = parent.get(cur) ?? null;
+          if (p) result.add(`${p}→${cur}`);
+          cur = p;
         }
       }
     }
@@ -302,10 +280,14 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
   const handleMouseEnter = useCallback((fqn: string) => setHoveredFqn(fqn), []);
   const handleMouseLeave = useCallback(() => setHoveredFqn(null), []);
 
+  useEffect(() => {
+    containerRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+  }, []);
+
   if (nodes.length === 0) return null;
 
-  // Layer labels
   const layerLabels = ['Sources', 'Staging', 'Facts', 'Executive', 'Layer 4', 'Layer 5'];
+  const maxLayer = Math.max(0, ...nodes.map((n) => n.layer));
 
   return (
     <div className="rounded-xl border border-border-subtle bg-surface-elevated overflow-hidden">
@@ -315,46 +297,165 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
           Unified Lineage Graph
         </h3>
         <p className="text-xs text-content-muted mt-0.5">
-          Hover over a failing table to see its root cause highlighted in red.
-          Root-cause tables show how many incidents they cause.
+          Hover a failing table to see its root cause turn red.
+          Root-cause badges show how many incidents each table causes.
         </p>
       </div>
 
-      {/* DAG */}
-      <div className="px-4 py-5 overflow-x-auto">
-        <div className="flex items-start justify-center gap-3 min-w-max">
-          {layers.map((layerNodes, layerIdx) => (
-            <div key={layerIdx} className="flex flex-col items-center gap-2">
-              {/* Layer label */}
-              <span className="text-[10px] font-medium text-content-faint uppercase tracking-wider mb-1">
-                {layerLabels[layerIdx] ?? `Layer ${layerIdx}`}
-              </span>
+      {/* Canvas */}
+      <div ref={containerRef} className="overflow-x-auto">
+        <div className="relative" style={{ width: canvasW, height: canvasH, minWidth: '100%' }}>
 
-              {/* Nodes in this layer */}
-              {layerNodes.map((node) => (
-                <div key={node.fqn} className="flex items-center gap-2">
-                  {/* Arrow from previous layer */}
-                  {layerIdx > 0 && <LayerArrow highlighted={
-                    edges.some(
-                      (e) =>
-                        e.to === node.fqn &&
-                        highlightedEdges.has(`${e.from}→${e.to}`)
-                    )
-                  } />}
-
-                  <DAGNodeBox
-                    node={node}
-                    omBaseUrl={omBaseUrl}
-                    isHovered={hoveredFqn === node.fqn}
-                    isHighlighted={highlighted.has(node.fqn)}
-                    isDimmed={hoveredFqn !== null && hoveredFqn !== node.fqn && !highlighted.has(node.fqn)}
-                    onMouseEnter={handleMouseEnter}
-                    onMouseLeave={handleMouseLeave}
-                  />
-                </div>
-              ))}
+          {/* Layer column labels */}
+          {Array.from({ length: maxLayer + 1 }).map((_, i) => (
+            <div
+              key={`lbl-${i}`}
+              className="absolute text-[10px] font-semibold text-content-faint uppercase tracking-wider"
+              style={{
+                left: PAD_X + i * (NODE_W + LAYER_GAP),
+                top: 10,
+                width: NODE_W,
+                textAlign: 'center',
+              }}
+            >
+              {layerLabels[i] ?? `Layer ${i}`}
             </div>
           ))}
+
+          {/* SVG edge layer */}
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            width={canvasW}
+            height={canvasH}
+          >
+            <defs>
+              <marker id="arr-n" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="7" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L10,4 L0,8 Z" className="fill-content-faint" opacity={0.5} />
+              </marker>
+              <marker id="arr-hl" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0,0 L10,4 L0,8 Z" className="fill-danger" />
+              </marker>
+              <marker id="arr-dim" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="7" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L10,4 L0,8 Z" className="fill-border-strong" opacity={0.2} />
+              </marker>
+            </defs>
+
+            {edges.map((e) => {
+              const fp = positions.get(e.from);
+              const tp = positions.get(e.to);
+              if (!fp || !tp) return null;
+
+              const key = `${e.from}→${e.to}`;
+              const isHL = highlightedEdges.has(key);
+              const isDim = hoveredFqn !== null && !isHL;
+
+              const x1 = fp.x + NODE_W;
+              const y1 = fp.y + NODE_H / 2;
+              const x2 = tp.x;
+              const y2 = tp.y + NODE_H / 2;
+              const dx = Math.abs(x2 - x1) * 0.45;
+
+              return (
+                <path
+                  key={key}
+                  d={`M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`}
+                  fill="none"
+                  strokeWidth={isHL ? 2.5 : 1.5}
+                  className={
+                    isHL
+                      ? 'stroke-danger'
+                      : isDim
+                        ? 'stroke-border-strong opacity-15'
+                        : 'stroke-content-faint opacity-40'
+                  }
+                  markerEnd={isHL ? 'url(#arr-hl)' : isDim ? 'url(#arr-dim)' : 'url(#arr-n)'}
+                  style={{ transition: 'all 0.2s ease' }}
+                />
+              );
+            })}
+          </svg>
+
+          {/* Nodes */}
+          {nodes.map((node) => {
+            const pos = positions.get(node.fqn);
+            if (!pos) return null;
+
+            const isFailing = node.failingIncidents.length > 0;
+            const isRootCause = node.rootCauseFor.length > 0;
+            const isHov = hoveredFqn === node.fqn;
+            const isHL = highlighted.has(node.fqn);
+            const isDim = hoveredFqn !== null && !isHov && !isHL;
+
+            let cls: string;
+            if (isHL) {
+              cls = 'bg-danger/20 border-danger/60 ring-2 ring-danger/30 shadow-glow scale-105';
+            } else if (isHov) {
+              cls = isFailing
+                ? 'bg-warning/30 border-warning ring-2 ring-warning/40 shadow-glow scale-105'
+                : isRootCause
+                  ? 'bg-primary-500/20 border-primary-500/60 ring-2 ring-primary-500/30 shadow-glow scale-105'
+                  : 'bg-surface-soft border-content-primary/50 ring-2 ring-content-primary/20 scale-105';
+            } else if (isDim) {
+              cls = 'bg-surface-soft/50 border-border-subtle/50 opacity-35';
+            } else if (isFailing) {
+              cls = 'bg-warning/15 border-warning/50 hover:border-warning';
+            } else if (isRootCause) {
+              cls = 'bg-primary-500/10 border-primary-500/30 hover:border-primary-500/50';
+            } else {
+              cls = 'bg-surface-soft border-border-subtle hover:border-border-strong';
+            }
+
+            const tips: string[] = [];
+            if (isFailing) {
+              tips.push(`⚠ DQ Fail: ${node.failingIncidents.map((id) => node.incidentTitles[id]).join(', ')}`);
+            }
+            if (isRootCause) {
+              tips.push(`🔴 Root cause for: ${node.rootCauseFor.map((id) => {
+                const col = node.rootCauseColumns[id];
+                const t = node.incidentTitles[id];
+                return col ? `${t} (${col})` : t;
+              }).join(', ')}`);
+            }
+
+            return (
+              <a
+                key={node.fqn}
+                href={`${omBaseUrl}/table/${node.fqn}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`absolute border rounded-xl flex flex-col items-center justify-center transition-all duration-200 cursor-pointer z-10 ${cls}`}
+                style={{ left: pos.x, top: pos.y, width: NODE_W, height: NODE_H }}
+                title={tips.join('\n')}
+                onMouseEnter={() => handleMouseEnter(node.fqn)}
+                onMouseLeave={handleMouseLeave}
+              >
+                {isRootCause && (
+                  <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-primary-500 text-white text-[10px] font-bold flex items-center justify-center shadow-md border-2 border-surface-elevated z-20">
+                    {node.rootCauseFor.length}
+                  </span>
+                )}
+                {isFailing && !isRootCause && (
+                  <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-warning text-surface-base text-[10px] font-bold flex items-center justify-center shadow-md border-2 border-surface-elevated z-20">
+                    !
+                  </span>
+                )}
+
+                <p className="text-xs font-semibold text-content-primary leading-tight">{node.name}</p>
+
+                {(isHL || isHov) && isRootCause && Object.keys(node.rootCauseColumns).length > 0 && (
+                  <p className="text-[9px] text-danger font-medium mt-0.5 leading-tight">
+                    ⚠ {[...new Set(Object.values(node.rootCauseColumns))].join(', ')}
+                  </p>
+                )}
+
+                {node.tier && !(isHL || isHov) && (
+                  <span className="text-[9px] px-1 py-px mt-0.5 bg-primary-500/10 text-primary-400 border border-primary-500/20 rounded">
+                    {node.tier.replace('Tier.', '')}
+                  </span>
+                )}
+              </a>
+            );
+          })}
         </div>
       </div>
 
@@ -377,131 +478,6 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
           Root Cause Badge
         </span>
       </div>
-    </div>
-  );
-}
-
-/* ── Node box ───────────────────────────────────────────────────────────── */
-
-function DAGNodeBox({
-  node,
-  omBaseUrl,
-  isHovered,
-  isHighlighted,
-  isDimmed,
-  onMouseEnter,
-  onMouseLeave,
-}: {
-  node: DAGNode;
-  omBaseUrl: string;
-  isHovered: boolean;
-  isHighlighted: boolean;
-  isDimmed: boolean;
-  onMouseEnter: (fqn: string) => void;
-  onMouseLeave: () => void;
-}) {
-  const isFailing = node.failingIncidents.length > 0;
-  const isRootCause = node.rootCauseFor.length > 0;
-
-  // Determine style
-  let style: string;
-  if (isHighlighted) {
-    // Highlighted red when hovered node reveals this as root cause / affected
-    style = 'bg-danger/20 border-danger/60 ring-2 ring-danger/30 shadow-glow scale-105';
-  } else if (isHovered) {
-    // The table being hovered
-    style = isFailing
-      ? 'bg-warning/30 border-warning ring-2 ring-warning/40 shadow-glow scale-105'
-      : isRootCause
-        ? 'bg-primary-500/20 border-primary-500/60 ring-2 ring-primary-500/30 shadow-glow scale-105'
-        : 'bg-surface-soft border-content-primary/50 ring-2 ring-content-primary/20 scale-105';
-  } else if (isDimmed) {
-    style = 'bg-surface-soft/50 border-border-subtle/50 opacity-40';
-  } else if (isFailing) {
-    // Default: DQ failure table
-    style = 'bg-warning/15 border-warning/50 hover:border-warning';
-  } else if (isRootCause) {
-    // Default: root cause table (subtle indicator)
-    style = 'bg-primary-500/10 border-primary-500/30 hover:border-primary-500/50';
-  } else {
-    // Normal table
-    style = 'bg-surface-soft border-border-subtle hover:border-border-strong';
-  }
-
-  // Tooltip lines
-  const tooltipLines: string[] = [];
-  if (isFailing) {
-    tooltipLines.push(`⚠ DQ Fail: ${node.failingIncidents.map((id) => node.incidentTitles[id]).join(', ')}`);
-  }
-  if (isRootCause) {
-    const entries = node.rootCauseFor.map((id) => {
-      const col = node.rootCauseColumns[id];
-      const title = node.incidentTitles[id];
-      return col ? `${title} (${col})` : title;
-    });
-    tooltipLines.push(`🔴 Root cause for: ${entries.join(', ')}`);
-  }
-
-  return (
-    <a
-      href={`${omBaseUrl}/table/${node.fqn}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`relative block border rounded-xl px-3 py-2.5 min-w-[130px] text-center transition-all duration-200 cursor-pointer ${style}`}
-      title={tooltipLines.join('\n')}
-      onMouseEnter={() => onMouseEnter(node.fqn)}
-      onMouseLeave={onMouseLeave}
-    >
-      {/* Root cause badge */}
-      {isRootCause && (
-        <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-primary-500 text-white text-[10px] font-bold flex items-center justify-center shadow-md border-2 border-surface-elevated">
-          {node.rootCauseFor.length}
-        </span>
-      )}
-
-      {/* Failing badge */}
-      {isFailing && !isRootCause && (
-        <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-warning text-surface-base text-[10px] font-bold flex items-center justify-center shadow-md border-2 border-surface-elevated">
-          !
-        </span>
-      )}
-
-      <p className="text-sm font-semibold text-content-primary">{node.name}</p>
-
-      {/* Show root cause columns on hover/highlight */}
-      {(isHighlighted || isHovered) && isRootCause && (
-        <div className="mt-1 space-y-0.5">
-          {Object.entries(node.rootCauseColumns).map(([incId, col]) => (
-            <p key={incId} className="text-[10px] text-danger font-medium">
-              ⚠ {col}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {node.tier && (
-        <span className="inline-block text-[10px] px-1.5 py-0.5 mt-1 bg-primary-500/10 text-primary-400 border border-primary-500/20 rounded-lg">
-          {node.tier.replace('Tier.', '')}
-        </span>
-      )}
-      {node.owners.length > 0 && (
-        <p className="text-[10px] text-content-muted mt-0.5 truncate max-w-[120px]">
-          {node.owners.join(', ')}
-        </p>
-      )}
-    </a>
-  );
-}
-
-/* ── Arrow between layers ───────────────────────────────────────────────── */
-
-function LayerArrow({ highlighted }: { highlighted: boolean }) {
-  return (
-    <div className={`flex items-center transition-all duration-200 ${highlighted ? 'opacity-100' : 'opacity-40'}`}>
-      <div className={`w-6 h-px ${highlighted ? 'bg-danger' : 'bg-border-strong'}`} />
-      <svg viewBox="0 0 8 12" className={`w-2 h-3 ${highlighted ? 'fill-danger' : 'fill-content-faint'}`}>
-        <polygon points="0,0 8,6 0,12" />
-      </svg>
     </div>
   );
 }
