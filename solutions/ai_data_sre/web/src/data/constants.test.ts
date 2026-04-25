@@ -54,8 +54,8 @@ describe('STATUS_CONFIG', () => {
   });
 
   it('labels match expected display names', () => {
-    expect(STATUS_CONFIG['detected'].label).toBe('Detected');
-    expect(STATUS_CONFIG['resolved'].label).toBe('Resolved');
+    expect(STATUS_CONFIG['detected']!.label).toBe('Detected');
+    expect(STATUS_CONFIG['resolved']!.label).toBe('Resolved');
   });
 });
 
@@ -65,7 +65,7 @@ describe('NAV_ITEMS', () => {
   });
 
   it('includes dashboard as first item', () => {
-    expect(NAV_ITEMS[0].id).toBe('dashboard');
+    expect(NAV_ITEMS[0]!.id).toBe('dashboard');
   });
 
   it('each item has id, label, and icon', () => {
@@ -84,8 +84,8 @@ describe('sortBySeverity', () => {
       makeSummary({ id: 'c', severity: 'CRITICAL' }),
     ];
     const sorted = sortBySeverity(incidents);
-    expect(sorted[0].id).toBe('c');
-    expect(sorted[1].id).toBe('h');
+    expect(sorted[0]!.id).toBe('c');
+    expect(sorted[1]!.id).toBe('h');
   });
 
   it('sorts all severities in correct order', () => {
@@ -108,7 +108,7 @@ describe('sortBySeverity', () => {
       makeSummary({ id: 'c', severity: 'CRITICAL' }),
     ];
     sortBySeverity(incidents);
-    expect(incidents[0].id).toBe('h');
+    expect(incidents[0]!.id).toBe('h');
   });
 
   it('handles empty array', () => {
@@ -121,6 +121,6 @@ describe('sortBySeverity', () => {
       makeSummary({ id: 'c', severity: 'CRITICAL' }),
     ];
     const sorted = sortBySeverity(incidents);
-    expect(sorted[0].id).toBe('c');
+    expect(sorted[0]!.id).toBe('c');
   });
 });

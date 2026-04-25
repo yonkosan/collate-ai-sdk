@@ -1,0 +1,12 @@
+# Ignore test files, node_modules, dev artifacts
+__pycache__
+*.pyc
+.pytest_cache
+.env
+web/node_modules
+web/.vite
+web/dist
+tests/
+ui/
+*.egg-info
+.git

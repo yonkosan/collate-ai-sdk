@@ -18,12 +18,16 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.config import DataPulseConfig
@@ -40,7 +44,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://localhost:5173"],
+    allow_origins=["http://localhost:3001", "http://localhost:5173", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -365,3 +369,27 @@ def _push_om_incident_status(inc: Incident, status_label: str) -> None:
                     logger.info("Pushed OM incident status '%s' for test %s", status_label, test_id)
     except Exception as exc:
         logger.warning("Failed to push OM incident status: %s", exc)
+
+
+# ─── Serve React frontend (production build) ─────────────────────────────
+
+_DIST_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
+
+if _DIST_DIR.is_dir():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=_DIST_DIR / "assets"), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve React SPA — any non-API route returns index.html."""
+        file_path = _DIST_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_DIST_DIR / "index.html")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run("api.server:app", host="0.0.0.0", port=port, reload=True)

@@ -71,7 +71,7 @@ describe('api.acknowledgeIncident', () => {
 
     await api.acknowledgeIncident('inc-1');
 
-    const call = mockFetch.mock.calls[0];
+    const call = mockFetch.mock.calls[0]!;
     expect(JSON.parse(call[1].body)).toEqual({ acknowledged_by: 'admin' });
   });
 });
