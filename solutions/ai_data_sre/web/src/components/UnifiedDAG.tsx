@@ -315,7 +315,7 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
           <svg className="absolute inset-0 pointer-events-none" width={canvasW} height={canvasH}>
             <defs>
               <marker id="ah" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="5" orient="auto-start-reverse">
-                <path d="M0,0 L10,4 L0,8 Z" fill="var(--color-content-faint)" opacity="0.6" />
+                <path d="M0,0 L10,4 L0,8 Z" fill="var(--color-content-secondary)" />
               </marker>
               <marker id="ah-hl" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
                 <path d="M0,0 L10,4 L0,8 Z" fill="var(--color-danger)" />
@@ -341,9 +341,9 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
                   key={key}
                   d={`M${x1},${y1} C${x1 + cx},${y1} ${x2 - cx},${y2} ${x2},${y2}`}
                   fill="none"
-                  stroke={hl ? 'var(--color-danger)' : 'var(--color-content-faint)'}
+                  stroke={hl ? 'var(--color-danger)' : 'var(--color-content-secondary)'}
                   strokeWidth={hl ? 2.5 : 1.5}
-                  opacity={dim ? 0.12 : hl ? 1 : 0.45}
+                  opacity={dim ? 0.15 : hl ? 1 : 0.85}
                   markerEnd={hl ? 'url(#ah-hl)' : 'url(#ah)'}
                   style={{ transition: 'all 0.2s' }}
                 />
