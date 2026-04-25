@@ -120,6 +120,7 @@ export function Sidebar({ incidents, activeNav, onNavChange, isOpen, onToggle }:
                 {incidents.slice(0, 5).map((inc) => {
                   const sev = SEVERITY_CONFIG[inc.severity] ?? DEFAULT_SEVERITY_CONFIG;
                   const shortTable = inc.root_cause_table.split('.').pop() ?? inc.root_cause_table;
+                  const isResolved = inc.status === 'resolved';
                   return (
                     <button
                       key={inc.id}
@@ -127,7 +128,11 @@ export function Sidebar({ incidents, activeNav, onNavChange, isOpen, onToggle }:
                         onNavChange('incidents');
                         onToggle();
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-surface-soft transition-colors"
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors border-l-[3px] ${
+                        isResolved
+                          ? 'border-l-emerald-500 bg-emerald-500/8 hover:bg-emerald-500/15'
+                          : 'border-l-red-500 bg-red-500/8 hover:bg-red-500/15'
+                      }`}
                     >
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sev.dot}`} />
                       <div className="flex-1 min-w-0">
@@ -138,6 +143,13 @@ export function Sidebar({ incidents, activeNav, onNavChange, isOpen, onToggle }:
                           {inc.failure_count} failure{inc.failure_count !== 1 ? 's' : ''}
                         </p>
                       </div>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        isResolved
+                          ? 'bg-emerald-500/15 text-emerald-400'
+                          : 'bg-red-500/15 text-red-400'
+                      }`}>
+                        {isResolved ? 'Resolved' : 'Active'}
+                      </span>
                     </button>
                   );
                 })}
