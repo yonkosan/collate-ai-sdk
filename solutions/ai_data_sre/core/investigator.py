@@ -252,14 +252,15 @@ class Investigator:
         root_cause_source_cols: List[str] = []
         for edge in lineage.get("upstreamEdges", []):
             to_id = edge["toEntity"]
-            for col_edge in edge.get("columnsLineage", []):
-                to_cols = col_edge.get("toColumns", [])
+            details = edge.get("lineageDetails", {})
+            for col_edge in details.get("columnsLineage", []):
+                # OM returns "toColumn" (singular string) not "toColumns"
+                to_col = col_edge.get("toColumn", "")
                 from_cols = col_edge.get("fromColumns", [])
-                if not from_cols:
+                if not from_cols or not to_col:
                     continue
                 from_col = from_cols[0]
-                for to_col in to_cols:
-                    col_map[(to_id, to_col)] = from_col
+                col_map[(to_id, to_col)] = from_col
                 # Track columns originating from root cause table
                 for fc in from_cols:
                     if fc.startswith(root_cause_fqn + "."):
