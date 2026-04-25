@@ -132,7 +132,9 @@ export default function App() {
   }, []);
 
   /* ─── Derived state ─────────────────────────────── */
-  const criticalCount = incidents.filter(
+  const allIncidents = [...incidents, ...PAST_INCIDENTS];
+
+  const criticalCount = allIncidents.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
 
@@ -146,7 +148,16 @@ export default function App() {
     (i) => i.status === 'resolved'
   );
 
-  const recurringCount = incidents.filter((i) => i.has_recurring_failures).length;
+  const recurringCount = allIncidents.filter((i) => i.has_recurring_failures).length;
+  const pastCritical = PAST_INCIDENTS.filter(
+    (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
+  ).length;
+  const currentCritical = incidents.filter(
+    (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
+  ).length;
+  const criticalDelta = pastCritical > 0
+    ? Math.round(((currentCritical - pastCritical) / pastCritical) * 100)
+    : 0;
   const currentPage = view.page;
 
   return (
@@ -192,9 +203,10 @@ export default function App() {
                   <div className="flex-shrink-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                     <StatCard
                       label="Total Incidents"
-                      value={incidents.length}
+                      value={allIncidents.length}
                       icon={<AlertTriangle className="w-4 h-4" />}
-                      sparkData={[3, 5, 2, 8, 4, 6, incidents.length]}
+                      delta={{ value: incidents.length > 0 ? Math.round((incidents.length / PAST_INCIDENTS.length) * 100) : 0, label: 'vs historical' }}
+                      sparkData={[2, 1, 4, 1, 3, PAST_INCIDENTS.length, allIncidents.length]}
                       sparkColor="#8b5cf6"
                       accentColor="text-primary-400"
                     />
@@ -202,8 +214,8 @@ export default function App() {
                       label="Critical / High"
                       value={criticalCount}
                       icon={<Shield className="w-4 h-4" />}
-                      delta={criticalCount > 0 ? { value: -criticalCount * 10, label: 'vs last scan' } : undefined}
-                      sparkData={[1, 3, 2, 5, 4, 2, criticalCount]}
+                      delta={criticalDelta !== 0 ? { value: criticalDelta, label: 'vs last scan' } : undefined}
+                      sparkData={[1, 2, 1, 3, pastCritical, criticalCount]}
                       sparkColor="#fb7185"
                       accentColor="text-danger"
                     />
@@ -211,7 +223,8 @@ export default function App() {
                       label="Recurring"
                       value={recurringCount}
                       icon={<RefreshCw className="w-4 h-4" />}
-                      sparkData={[2, 1, 3, 2, 4, 3, recurringCount]}
+                      delta={recurringCount > 0 ? { value: recurringCount > 2 ? 50 : 0, label: `${recurringCount} test${recurringCount !== 1 ? 's' : ''} repeating` } : undefined}
+                      sparkData={[0, 1, 0, 2, 1, recurringCount]}
                       sparkColor="#fbbf24"
                       accentColor="text-warning"
                     />
