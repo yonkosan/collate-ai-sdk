@@ -367,6 +367,8 @@ class MetadataProvisioner:
         self._enrich_tables()
         self._create_glossary()
         self._create_lineage()
+        self._push_sample_data()
+        self._push_table_profiles()
         self._create_test_cases()
         self._seed_test_result_history()
         self._print_summary()
@@ -375,7 +377,7 @@ class MetadataProvisioner:
     # ── Step 0a: Create teams ────────────────────────────────────────────
 
     def _create_teams(self) -> None:
-        console.print("\n[bold]0a/10[/] Creating ownership teams…")
+        console.print("\n[bold]0a/12[/] Creating ownership teams…")
         for team in TEAMS_TO_CREATE:
             payload = {
                 "name": team["name"],
@@ -392,7 +394,7 @@ class MetadataProvisioner:
     # ── Step 0b: Create domain ──────────────────────────────────────────────
 
     def _create_domain(self) -> None:
-        console.print("\n[bold]0b/10[/] Creating business domain…")
+        console.print("\n[bold]0b/12[/] Creating business domain…")
         payload = {
             "name": DOMAIN_NAME.replace(" ", "-").lower(),
             "displayName": DOMAIN_NAME,
@@ -413,7 +415,7 @@ class MetadataProvisioner:
     # ── Step 1: Create MySQL service ────────────────────────────────────────
 
     def _create_service(self) -> None:
-        console.print("\n[bold]1/10[/] Creating MySQL database service…")
+        console.print("\n[bold]1/12[/] Creating MySQL database service…")
         mysql = self._config.mysql
         payload = {
             "name": SERVICE_NAME,
@@ -446,7 +448,7 @@ class MetadataProvisioner:
     # ── Step 2: Create database entity ────────────────────────────────────
 
     def _create_database_and_schema(self) -> None:
-        console.print("\n[bold]2/10[/] Creating database & schema entities…")
+        console.print("\n[bold]2/12[/] Creating database & schema entities…")
 
         # Create database entity
         db_payload = {
@@ -549,7 +551,7 @@ class MetadataProvisioner:
     }
 
     def _create_tables_directly(self) -> None:
-        console.print("[bold]3/10[/] Creating table entities via REST API…")
+        console.print("[bold]3/12[/] Creating table entities via REST API…")
         schema_fqn = f"{SERVICE_NAME}.{DATABASE_NAME}.{DATABASE_NAME}"
 
         for table_name in TABLE_NAMES:
@@ -632,7 +634,7 @@ class MetadataProvisioner:
     # ── Step 5a: Enrich tables with tags, tiers, owners ──────────────────
 
     def _enrich_tables(self) -> None:
-        console.print("[bold]5a/10[/] Enriching tables with tiers, owners, PII tags…")
+        console.print("[bold]5a/12[/] Enriching tables with tiers, owners, PII tags…")
         import json as _json
 
         for table_name in TABLE_NAMES:
@@ -732,7 +734,7 @@ class MetadataProvisioner:
     # ── Step 5b: Create glossary ────────────────────────────────────────────
 
     def _create_glossary(self) -> None:
-        console.print("[bold]5b/10[/] Creating business glossary…")
+        console.print("[bold]5b/12[/] Creating business glossary…")
 
         # Create glossary
         glossary_payload = {
@@ -770,7 +772,7 @@ class MetadataProvisioner:
     # ── Step 6: Create lineage ──────────────────────────────────────────────
 
     def _create_lineage(self) -> None:
-        console.print("[bold]6/10[/] Creating lineage edges…")
+        console.print("[bold]6a/12[/] Creating lineage edges…")
 
         for edge in LINEAGE_EDGES:
             from_name = edge["from"]
@@ -818,10 +820,112 @@ class MetadataProvisioner:
                     f"  [yellow]⚠ {from_name} → {to_name}: {resp.status_code}[/]"
                 )
 
-    # ── Step 5: Create test cases ───────────────────────────────────────────
+    # ── Step 6b: Push sample data from MySQL ────────────────────────────────
+
+    def _push_sample_data(self) -> None:
+        """Fetch sample rows from MySQL and push to OM so tables show data."""
+        import subprocess
+
+        console.print("[bold]6b/12[/] Pushing sample data from MySQL…")
+        mysql = self._config.mysql
+        mysql_cmd_prefix = (
+            f"docker exec openmetadata_mysql mysql "
+            f"-u{mysql.user} -p{mysql.password} -N -B -e"
+        )
+
+        for table_name in TABLE_NAMES:
+            if table_name not in self._table_ids:
+                continue
+
+            table_id = self._table_ids[table_name]
+            col_names = [c["name"] for c in self.TABLE_SCHEMAS[table_name]]
+            cols_sql = ", ".join(col_names)
+
+            result = subprocess.run(
+                f'{mysql_cmd_prefix} '
+                f'"SELECT {cols_sql} FROM {mysql.database}.{table_name} LIMIT 50;"',
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+
+            rows = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    rows.append(line.split("\t"))
+
+            if not rows:
+                console.print(f"  [yellow]⏭ {table_name}: no rows in MySQL[/]")
+                continue
+
+            payload = {"columns": col_names, "rows": rows}
+            resp = self._client.put(
+                f"/api/v1/tables/{table_id}/sampleData",
+                json=payload,
+            )
+            if resp.status_code < 400:
+                console.print(f"  ✓ {table_name}: {len(rows)} sample rows")
+            else:
+                console.print(
+                    f"  [yellow]⚠ {table_name}: {resp.status_code}[/]"
+                )
+
+    # ── Step 6c: Push table profiles (row counts) ───────────────────────────
+
+    def _push_table_profiles(self) -> None:
+        """Push row count profiles so tables show data stats in OM UI."""
+        import subprocess
+        import time
+
+        console.print("[bold]6c/12[/] Pushing table profiles (row counts)…")
+        mysql = self._config.mysql
+        ts = int(time.time() * 1000)
+
+        for table_name in TABLE_NAMES:
+            if table_name not in self._table_ids:
+                continue
+
+            table_id = self._table_ids[table_name]
+            col_count = len(self.TABLE_SCHEMAS[table_name])
+
+            result = subprocess.run(
+                f"docker exec openmetadata_mysql mysql "
+                f"-u{mysql.user} -p{mysql.password} -N -B -e "
+                f'"SELECT COUNT(*) FROM {mysql.database}.{table_name};"',
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            row_count = (
+                int(result.stdout.strip())
+                if result.stdout.strip().isdigit()
+                else 0
+            )
+
+            profile_payload = {
+                "tableProfile": {
+                    "timestamp": ts,
+                    "rowCount": row_count,
+                    "columnCount": col_count,
+                },
+                "columnProfile": [],
+            }
+            resp = self._client.put(
+                f"/api/v1/tables/{table_id}/tableProfile",
+                json=profile_payload,
+            )
+            if resp.status_code < 400:
+                console.print(f"  ✓ {table_name}: {row_count:,} rows")
+            else:
+                console.print(
+                    f"  [yellow]⚠ {table_name}: {resp.status_code} "
+                    f"{resp.text[:100]}[/]"
+                )
+
+    # ── Step 7: Create test cases ───────────────────────────────────────────
 
     def _create_test_cases(self) -> None:
-        console.print("[bold]7/10[/] Creating data quality test cases…")
+        console.print("[bold]7/12[/] Creating data quality test cases…")
 
         for tc in TEST_CASES:
             table_name = tc["table"]
@@ -855,7 +959,7 @@ class MetadataProvisioner:
 
     def _seed_test_result_history(self) -> None:
         """Seed 8 historical test results per test case for trend analysis."""
-        console.print("[bold]8/10[/] Seeding test result history (8 runs per test)…")
+        console.print("[bold]8/12[/] Seeding test result history (8 runs per test)…")
         from datetime import timedelta
         now = datetime.now(timezone.utc)
 
@@ -934,6 +1038,8 @@ class MetadataProvisioner:
         table.add_row("Glossary terms", str(len(GLOSSARY_TERMS)))
         table.add_row("Tables discovered", str(len(self._table_ids)))
         table.add_row("Lineage edges", str(len(LINEAGE_EDGES)))
+        table.add_row("Sample data pushed", f"{len(self._table_ids)} tables")
+        table.add_row("Table profiles pushed", f"{len(self._table_ids)} tables")
         table.add_row("Test cases", str(len(TEST_CASES)))
         table.add_row(
             "Historical results seeded",
