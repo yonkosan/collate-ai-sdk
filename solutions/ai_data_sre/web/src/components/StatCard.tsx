@@ -24,15 +24,15 @@ export function StatCard({
   const isPositive = delta ? delta.value >= 0 : false;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border-subtle bg-surface-elevated p-5 transition-all hover:border-primary-500/30 hover:shadow-card-hover group">
+    <div className="relative overflow-hidden rounded-xl border border-border-subtle bg-surface-elevated p-3.5 transition-all hover:border-primary-500/30 hover:shadow-card-hover group">
       {/* Subtle noise texture */}
       <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none" />
 
       <div className="relative z-10">
         {/* Top row: icon + delta */}
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-2">
           <span
-            className={`flex items-center justify-center w-9 h-9 rounded-lg bg-surface-soft border border-border-subtle ${accentColor}`}
+            className={`flex items-center justify-center w-8 h-8 rounded-lg bg-surface-soft border border-border-subtle ${accentColor}`}
           >
             {icon}
           </span>
@@ -61,7 +61,7 @@ export function StatCard({
         </p>
 
         {/* Value */}
-        <p className="text-2xl font-bold text-content-primary tracking-tight">
+        <p className="text-xl font-bold text-content-primary tracking-tight">
           {value}
         </p>
 
@@ -74,7 +74,7 @@ export function StatCard({
       {/* Sparkline anchored at bottom */}
       {sparkData && sparkData.length > 1 && (
         <div className="absolute bottom-0 left-0 right-0 opacity-60 group-hover:opacity-80 transition-opacity">
-          <Sparkline data={sparkData} color={sparkColor} height={28} />
+          <Sparkline data={sparkData} color={sparkColor} height={22} />
         </div>
       )}
     </div>
