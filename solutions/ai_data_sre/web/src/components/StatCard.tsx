@@ -7,6 +7,8 @@ interface StatCardProps {
   value: number | string;
   icon: ReactNode;
   delta?: { value: number; label: string };
+  /** When true, positive delta is bad (red) — use for metrics where higher = worse */
+  invertDelta?: boolean;
   sparkData?: number[];
   sparkColor?: string;
   accentColor?: string;
@@ -17,11 +19,13 @@ export function StatCard({
   value,
   icon,
   delta,
+  invertDelta = false,
   sparkData,
   sparkColor = '#8b5cf6',
   accentColor = 'text-primary-400',
 }: StatCardProps) {
   const isPositive = delta ? delta.value >= 0 : false;
+  const isGood = invertDelta ? !isPositive : isPositive;
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-border-subtle bg-surface-elevated p-3.5 transition-all hover:border-primary-500/30 hover:shadow-card-hover group">
@@ -39,7 +43,7 @@ export function StatCard({
           {delta && (
             <span
               className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
-                isPositive
+                isGood
                   ? 'bg-success/10 text-success'
                   : 'bg-danger/10 text-danger'
               }`}

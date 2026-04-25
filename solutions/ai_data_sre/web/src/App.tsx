@@ -205,7 +205,8 @@ export default function App() {
                       label="Total Incidents"
                       value={allIncidents.length}
                       icon={<AlertTriangle className="w-4 h-4" />}
-                      delta={{ value: incidents.length > 0 ? Math.round((incidents.length / PAST_INCIDENTS.length) * 100) : 0, label: 'vs historical' }}
+                      delta={incidents.length > 0 ? { value: Math.round(((incidents.length - PAST_INCIDENTS.length) / PAST_INCIDENTS.length) * 100), label: `${incidents.length} new vs ${PAST_INCIDENTS.length} historical` } : undefined}
+                      invertDelta
                       sparkData={[2, 1, 4, 1, 3, PAST_INCIDENTS.length, allIncidents.length]}
                       sparkColor="#8b5cf6"
                       accentColor="text-primary-400"
@@ -214,7 +215,8 @@ export default function App() {
                       label="Critical / High"
                       value={criticalCount}
                       icon={<Shield className="w-4 h-4" />}
-                      delta={criticalDelta !== 0 ? { value: criticalDelta, label: 'vs last scan' } : undefined}
+                      delta={criticalDelta !== 0 ? { value: criticalDelta, label: `${currentCritical} current, ${pastCritical} historical` } : undefined}
+                      invertDelta
                       sparkData={[1, 2, 1, 3, pastCritical, criticalCount]}
                       sparkColor="#fb7185"
                       accentColor="text-danger"
@@ -223,7 +225,6 @@ export default function App() {
                       label="Recurring"
                       value={recurringCount}
                       icon={<RefreshCw className="w-4 h-4" />}
-                      delta={recurringCount > 0 ? { value: recurringCount > 2 ? 50 : 0, label: `${recurringCount} test${recurringCount !== 1 ? 's' : ''} repeating` } : undefined}
                       sparkData={[0, 1, 0, 2, 1, recurringCount]}
                       sparkColor="#fbbf24"
                       accentColor="text-warning"
