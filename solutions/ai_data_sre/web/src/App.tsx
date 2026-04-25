@@ -19,7 +19,8 @@ import { IncidentSection } from './components/IncidentSection';
 import { IncidentDetailPanel } from './components/IncidentDetailPanel';
 import { EmptyState } from './components/EmptyState';
 import { IncidentsPage } from './components/IncidentsPage';
-import { LineagePage, ReportsPage, SettingsPage } from './components/PlaceholderPages';
+import { ReportsPage, SettingsPage } from './components/PlaceholderPages';
+import { UnifiedLineagePage } from './components/UnifiedLineagePage';
 
 type NavPage = 'dashboard' | 'incidents' | 'lineage' | 'reports' | 'settings';
 type View = { page: NavPage } | { page: 'detail'; incidentId: string };
@@ -296,10 +297,14 @@ export default function App() {
               </div>
             )}
 
-            {/* === PLACEHOLDER PAGES === */}
+            {/* === LINEAGE === */}
             {currentPage === 'lineage' && (
-              <div className="flex-1 min-h-0"><LineagePage /></div>
+              <div className="flex-1 min-h-0">
+                <UnifiedLineagePage incidents={incidents} />
+              </div>
             )}
+
+            {/* === PLACEHOLDER PAGES === */}
             {currentPage === 'reports' && (
               <div className="flex-1 min-h-0"><ReportsPage /></div>
             )}
