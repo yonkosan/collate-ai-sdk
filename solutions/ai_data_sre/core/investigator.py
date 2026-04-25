@@ -76,16 +76,27 @@ class Investigator:
         # Build node lookup from lineage response
         self._build_node_cache(lineage)
 
-        # Walk upstream to find root cause
+        # Walk upstream to find ALL upstream nodes (full graph)
         entity_id = lineage.get("entity", {}).get("id", "")
-        upstream_chain = self._walk_upstream(lineage, entity_id)
-        root_cause_fqn = upstream_chain[-1].fqn if upstream_chain else start_table_fqn
+        all_upstream = self._walk_upstream(lineage, entity_id)
 
-        # Trace column upstream through column-level lineage
+        # Trace the failing column through column lineage to find the TRUE
+        # root cause table and column — not just the last BFS node.
         fail_message = incident.failures[0].result_message or ""
-        root_cause_column = self._trace_column_upstream(
-            lineage, start_column, start_table_fqn, root_cause_fqn, fail_message
+        root_cause_fqn, root_cause_column = self._trace_root_cause(
+            lineage, start_column, start_table_fqn, fail_message
         )
+
+        # Build the path from start table to root cause using table-level edges,
+        # so we only show relevant upstream tables (not unrelated branches).
+        path_fqns = self._find_path_to_root(lineage, entity_id, root_cause_fqn)
+
+        # Filter upstream chain to only tables on the path to the root cause,
+        # and exclude both the start table and root cause (shown separately).
+        upstream_chain = [
+            a for a in all_upstream
+            if a.fqn in path_fqns and a.fqn != root_cause_fqn
+        ]
 
         # Walk downstream from root cause to find full impact
         root_lineage = self._fetch_lineage(root_cause_fqn)
@@ -222,63 +233,108 @@ class Investigator:
 
         return chain
 
-    def _trace_column_upstream(
+    def _find_path_to_root(
+        self, lineage: dict, start_id: str, root_cause_fqn: str
+    ) -> Set[str]:
+        """Find all table FQNs on the shortest path from start to root cause.
+
+        Uses BFS with parent tracking to find the path through the upstream
+        graph. Returns the set of FQNs on that path (excluding start table).
+        If no path is found, returns all upstream FQNs as fallback.
+        """
+        # Build adjacency: child_id → [parent_ids]
+        upstream_adj: Dict[str, List[str]] = {}
+        for edge in lineage.get("upstreamEdges", []):
+            to_id = edge["toEntity"]
+            from_id = edge["fromEntity"]
+            upstream_adj.setdefault(to_id, []).append(from_id)
+
+        # Find root cause entity id
+        root_id: Optional[str] = None
+        for nid, ndata in self._node_cache.items():
+            if ndata.get("fqn", "") == root_cause_fqn:
+                root_id = nid
+                break
+
+        if not root_id:
+            return {n.get("fqn", "") for n in self._node_cache.values()}
+
+        # BFS from start to find root cause, tracking parents
+        parent_map: Dict[str, Optional[str]] = {start_id: None}
+        queue = [start_id]
+        found = False
+        while queue and not found:
+            next_queue: List[str] = []
+            for current_id in queue:
+                for parent_id in upstream_adj.get(current_id, []):
+                    if parent_id not in parent_map:
+                        parent_map[parent_id] = current_id
+                        if parent_id == root_id:
+                            found = True
+                            break
+                        next_queue.append(parent_id)
+                if found:
+                    break
+            queue = next_queue
+
+        if not found:
+            return {n.get("fqn", "") for n in self._node_cache.values()}
+
+        # Walk back from root to start to collect path FQNs
+        path_fqns: Set[str] = set()
+        current: Optional[str] = root_id
+        while current is not None:
+            node = self._node_cache.get(current, {})
+            fqn = node.get("fqn", "")
+            if fqn:
+                path_fqns.add(fqn)
+            current = parent_map.get(current)
+
+        return path_fqns
+
+    def _trace_root_cause(
         self,
         lineage: dict,
         column_name: Optional[str],
         start_table_fqn: str,
-        root_cause_fqn: str,
         fail_message: str = "",
-    ) -> Optional[str]:
-        """Trace a column through column-level lineage to find the root cause column.
+    ) -> Tuple[str, Optional[str]]:
+        """Trace a column through column-level lineage to find both the root
+        cause *table* and *column*.
 
-        If the root cause table is the same as the start table, returns the
-        original column unchanged.  Otherwise, walks upstream edges that carry
-        ``columnsLineage`` metadata and resolves the source column name at the
-        root cause table.
+        Returns ``(root_cause_table_fqn, root_cause_column_name)``.
 
-        For computed columns (no direct column lineage ancestor), falls back to
-        checking which source columns from the root cause table are mentioned
-        in the failure message, since those are the most likely contributors.
+        Walks ``columnsLineage`` metadata on upstream edges hop-by-hop until
+        no further upstream mapping exists.  Then checks if the failure message
+        references a deeper upstream table.column — which catches computed
+        columns whose root cause is further upstream.
         """
         if not column_name:
-            return None
-        if root_cause_fqn == start_table_fqn:
-            return column_name
+            return start_table_fqn, None
 
         # Build a column-level reverse map: (to_entity_id, to_col_fqn) → from_col_fqn
         col_map: Dict[Tuple[str, str], str] = {}
-        # Also collect all source columns from the root cause table
-        root_cause_source_cols: List[str] = []
         for edge in lineage.get("upstreamEdges", []):
             to_id = edge["toEntity"]
             details = edge.get("lineageDetails", {})
             for col_edge in details.get("columnsLineage", []):
-                # OM returns "toColumn" (singular string) not "toColumns"
                 to_col = col_edge.get("toColumn", "")
                 from_cols = col_edge.get("fromColumns", [])
                 if not from_cols or not to_col:
                     continue
-                from_col = from_cols[0]
-                col_map[(to_id, to_col)] = from_col
-                # Track columns originating from root cause table
-                for fc in from_cols:
-                    if fc.startswith(root_cause_fqn + "."):
-                        col_name = fc.rsplit(".", 1)[-1]
-                        if col_name not in root_cause_source_cols:
-                            root_cause_source_cols.append(col_name)
+                col_map[(to_id, to_col)] = from_cols[0]
 
-        # Walk the upstream chain, tracing the column at each hop
-        current_col_fqn = f"{start_table_fqn}.{column_name}"
+        # Build id ↔ fqn lookups
         entity_id = lineage.get("entity", {}).get("id", "")
-
-        # Build id → fqn lookup
-        fqn_to_id: Dict[str, str] = {}
+        fqn_to_id: Dict[str, str] = {start_table_fqn: entity_id}
+        id_to_fqn: Dict[str, str] = {entity_id: start_table_fqn}
         for nid, ndata in self._node_cache.items():
-            fqn_to_id[ndata.get("fqn", "")] = nid
-        fqn_to_id[start_table_fqn] = entity_id
+            fqn = ndata.get("fqn", "")
+            fqn_to_id[fqn] = nid
+            id_to_fqn[nid] = fqn
 
-        # Traverse upstream following column lineage
+        # Walk upstream following column lineage hop by hop
+        current_col_fqn = f"{start_table_fqn}.{column_name}"
         visited: Set[str] = set()
         current_id = entity_id
         while current_id and current_id not in visited:
@@ -291,27 +347,48 @@ class Investigator:
             else:
                 break
 
-        # Extract just the column name from the FQN
-        resolved = current_col_fqn.rsplit(".", 1)[-1]
-        if resolved != column_name or root_cause_fqn == start_table_fqn:
-            return resolved
+        # Split FQN into table + column
+        parts = current_col_fqn.rsplit(".", 1)
+        traced_table = parts[0] if len(parts) == 2 else start_table_fqn
+        traced_col = parts[-1]
 
-        # Column didn't trace (computed). Check if the failure message
-        # mentions any source column from the root cause table.
-        root_table_short = root_cause_fqn.rsplit(".", 1)[-1]
+        # Check the failure message for a deeper root cause reference.
+        # The message may say "raw_orders.order_date" even when column lineage
+        # stopped at a mid-tier computed column.
         msg_lower = fail_message.lower()
-        for src_col in root_cause_source_cols:
-            # Match "raw_orders.order_date" or just "order_date" in the message
-            if (
-                f"{root_table_short}.{src_col}".lower() in msg_lower
-                or src_col.lower() in msg_lower
-            ):
-                return src_col
+        all_from_cols: List[str] = []
+        for edge in lineage.get("upstreamEdges", []):
+            details = edge.get("lineageDetails", {})
+            for col_edge in details.get("columnsLineage", []):
+                for fc in col_edge.get("fromColumns", []):
+                    all_from_cols.append(fc)
 
-        # Last resort: return the first source column from the root cause table
-        if root_cause_source_cols:
-            return root_cause_source_cols[0]
-        return None
+        for fc in all_from_cols:
+            fc_parts = fc.rsplit(".", 1)
+            if len(fc_parts) != 2:
+                continue
+            fc_table_fqn = fc_parts[0]
+            fc_col = fc_parts[1]
+            fc_table_short = fc_table_fqn.rsplit(".", 1)[-1]
+            if f"{fc_table_short}.{fc_col}".lower() in msg_lower:
+                return fc_table_fqn, fc_col
+
+        # If column traced beyond the start table, use that result
+        if traced_table != start_table_fqn:
+            return traced_table, traced_col
+
+        # Last resort — walk all upstream and pick the deepest table
+        all_upstream = self._walk_upstream(lineage, entity_id)
+        if all_upstream:
+            return all_upstream[-1].fqn, None
+        return start_table_fqn, column_name
+
+        # Last resort — walk all upstream and pick the deepest table-level root
+        all_upstream = self._walk_upstream(lineage, entity_id)
+        if all_upstream:
+            deepest = all_upstream[-1]
+            return deepest.fqn, None
+        return start_table_fqn, column_name
 
     def _walk_downstream(self, lineage: dict, entity_id: str) -> List[AffectedAsset]:
         """Walk downstream edges to find all impacted assets."""
