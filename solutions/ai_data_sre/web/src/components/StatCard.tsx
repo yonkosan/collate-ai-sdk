@@ -9,6 +9,8 @@ interface StatCardProps {
   delta?: { value: number; label: string };
   /** When true, positive delta is bad (red) — use for metrics where higher = worse */
   invertDelta?: boolean;
+  /** Simple text shown below the value — use instead of delta for context without fake % */
+  subtitle?: string;
   sparkData?: number[];
   sparkColor?: string;
   accentColor?: string;
@@ -20,6 +22,7 @@ export function StatCard({
   icon,
   delta,
   invertDelta = false,
+  subtitle,
   sparkData,
   sparkColor = '#8b5cf6',
   accentColor = 'text-primary-400',
@@ -72,6 +75,11 @@ export function StatCard({
         {/* Delta label */}
         {delta && (
           <p className="text-xs text-content-faint mt-1">{delta.label}</p>
+        )}
+
+        {/* Subtitle */}
+        {subtitle && !delta && (
+          <p className="text-xs text-content-muted mt-1">{subtitle}</p>
         )}
       </div>
 

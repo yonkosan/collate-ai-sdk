@@ -155,9 +155,6 @@ export default function App() {
   const currentCritical = incidents.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
-  const criticalDelta = pastCritical > 0
-    ? Math.round(((currentCritical - pastCritical) / pastCritical) * 100)
-    : 0;
   const currentPage = view.page;
 
   return (
@@ -205,8 +202,7 @@ export default function App() {
                       label="Total Incidents"
                       value={allIncidents.length}
                       icon={<AlertTriangle className="w-4 h-4" />}
-                      delta={incidents.length > 0 ? { value: Math.round(((incidents.length - PAST_INCIDENTS.length) / PAST_INCIDENTS.length) * 100), label: `${incidents.length} new vs ${PAST_INCIDENTS.length} historical` } : undefined}
-                      invertDelta
+                      subtitle={`${incidents.length} active · ${PAST_INCIDENTS.length} resolved`}
                       sparkData={[2, 1, 4, 1, 3, PAST_INCIDENTS.length, allIncidents.length]}
                       sparkColor="#8b5cf6"
                       accentColor="text-primary-400"
@@ -215,8 +211,7 @@ export default function App() {
                       label="Critical / High"
                       value={criticalCount}
                       icon={<Shield className="w-4 h-4" />}
-                      delta={criticalDelta !== 0 ? { value: criticalDelta, label: `${currentCritical} current, ${pastCritical} historical` } : undefined}
-                      invertDelta
+                      subtitle={`${currentCritical} active · ${pastCritical} resolved`}
                       sparkData={[1, 2, 1, 3, pastCritical, criticalCount]}
                       sparkColor="#fb7185"
                       accentColor="text-danger"
@@ -225,6 +220,7 @@ export default function App() {
                       label="Recurring"
                       value={recurringCount}
                       icon={<RefreshCw className="w-4 h-4" />}
+                      subtitle={recurringCount > 0 ? `${recurringCount} test${recurringCount !== 1 ? 's' : ''} failed 2+ times` : 'No repeat failures'}
                       sparkData={[0, 1, 0, 2, 1, recurringCount]}
                       sparkColor="#fbbf24"
                       accentColor="text-warning"
