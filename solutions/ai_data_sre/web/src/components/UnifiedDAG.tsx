@@ -268,7 +268,7 @@ export function UnifiedDAG({ details, omBaseUrl }: Props) {
         if (tgt === src || !parent.has(tgt)) continue;
         let cur: string | null = tgt;
         while (cur !== null && cur !== src) {
-          const p = parent.get(cur) ?? null;
+          const p: string | null = parent.get(cur) ?? null;
           if (p) result.add(`${p}→${cur}`);
           cur = p;
         }
