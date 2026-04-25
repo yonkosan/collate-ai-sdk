@@ -14,6 +14,7 @@ interface HeaderBarProps {
   pipelineRan: boolean;
   onRunPipeline: () => void;
   onRefresh: () => void;
+  pipelinePhase?: string | null;
 }
 
 export function HeaderBar({
@@ -23,6 +24,7 @@ export function HeaderBar({
   pipelineRan,
   onRunPipeline,
   onRefresh,
+  pipelinePhase,
 }: HeaderBarProps) {
   return (
     <header className="sticky top-0 z-20 border-b border-border-subtle glass">
@@ -57,7 +59,7 @@ export function HeaderBar({
             {loading ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span className="hidden sm:inline">Running…</span>
+                <span className="hidden sm:inline">{pipelinePhase ?? 'Running…'}</span>
               </>
             ) : (
               <>

@@ -18,16 +18,13 @@ Usage:
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.config import DataPulseConfig
@@ -44,7 +41,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://localhost:5173", "http://localhost:8000"],
+    allow_origins=["http://localhost:3001", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,6 +162,87 @@ def run_pipeline():
         )
     finally:
         orch.close()
+
+
+@app.get("/api/pipeline/stream")
+def stream_pipeline():
+    """SSE endpoint: streams pipeline phases and incidents as they're discovered."""
+    import json
+
+    from core.config import DataPulseConfig
+    from core.investigator import Investigator
+    from core.narrator import Narrator
+    from core.sentinel import Sentinel
+    from core.slack_notifier import SlackNotifier as _SlackNotifier
+
+    def _sse(event: str, data: str) -> str:
+        return f"event: {event}\ndata: {data}\n\n"
+
+    def generate():
+        config = DataPulseConfig.from_env()
+        sentinel = Sentinel(config)
+        investigator = Investigator(config)
+        narrator = Narrator(config)
+        slack = _SlackNotifier(config)
+
+        try:
+            yield _sse("phase", "Scanning for data quality failures…")
+            incidents = sentinel.scan()
+
+            if not incidents:
+                yield _sse("phase", "No incidents detected — all clear!")
+                yield _sse("done", "{}")
+                return
+
+            yield _sse("phase", f"Found {len(incidents)} incident(s). Investigating…")
+
+            # Emit each incident as soon as it's detected
+            for inc in incidents:
+                _incidents[inc.id] = inc
+                yield _sse("incident", json.dumps(_incident_to_summary(inc).model_dump()))
+
+            # Phase 2: Investigate each incident
+            for i, inc in enumerate(incidents, 1):
+                yield _sse("phase", f"Investigating root cause ({i}/{len(incidents)})…")
+                investigator.investigate(inc)
+                yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
+
+            # Phase 3: Narrate
+            for i, inc in enumerate(incidents, 1):
+                yield _sse("phase", f"Generating AI report ({i}/{len(incidents)})…")
+                narrator.narrate(inc)
+                yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
+
+            # Phase 4: Slack
+            yield _sse("phase", "Sending Slack notifications…")
+            for inc in incidents:
+                thread_ts = slack.post_new_incident(inc)
+                if thread_ts:
+                    inc.slack_thread_ts = thread_ts
+                    inc.slack_thread_url = slack.build_thread_url(thread_ts)
+                    slack.post_ai_report(inc)
+                yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
+
+            yield _sse("phase", "Pipeline complete!")
+            yield _sse("done", "{}")
+
+        except Exception as exc:
+            logger.exception("SSE pipeline error")
+            yield _sse("error", json.dumps({"message": str(exc)}))
+            yield _sse("done", "{}")
+        finally:
+            sentinel.close()
+            investigator.close()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/incidents", response_model=List[IncidentSummary])
@@ -369,27 +447,3 @@ def _push_om_incident_status(inc: Incident, status_label: str) -> None:
                     logger.info("Pushed OM incident status '%s' for test %s", status_label, test_id)
     except Exception as exc:
         logger.warning("Failed to push OM incident status: %s", exc)
-
-
-# ─── Serve React frontend (production build) ─────────────────────────────
-
-_DIST_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
-
-if _DIST_DIR.is_dir():
-    # Serve static assets (JS, CSS, images)
-    app.mount("/assets", StaticFiles(directory=_DIST_DIR / "assets"), name="static-assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """Serve React SPA — any non-API route returns index.html."""
-        file_path = _DIST_DIR / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(_DIST_DIR / "index.html")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.environ.get("PORT", "8000"))
-    uvicorn.run("api.server:app", host="0.0.0.0", port=port, reload=True)

@@ -7,7 +7,6 @@ import {
   ExternalLink,
   FileText,
   GitBranch,
-  MessageSquare,
   Search,
   Shield,
   User,
@@ -17,6 +16,7 @@ import {
 import { api } from '../api';
 import type { IncidentDetail, UserInfo } from '../types';
 import { SEVERITY_CONFIG, DEFAULT_SEVERITY_CONFIG, STATUS_CONFIG } from '../data/constants';
+import { OpenMetadataIcon, SlackIcon } from './BrandIcons';
 import { FailureHistoryChart } from './FailureHistoryChart';
 import { LineageGraph } from './LineageGraph';
 
@@ -189,7 +189,7 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 text-sm border border-border-subtle text-content-muted hover:text-content-primary hover:bg-surface-soft rounded-xl transition-all"
           >
-            <ExternalLink className="w-4 h-4" />
+            <OpenMetadataIcon className="w-4 h-4" />
             OpenMetadata
           </a>
         )}
@@ -201,7 +201,7 @@ export function IncidentDetailPanel({ incident, onBack, onUpdate }: Props) {
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 text-sm border border-primary-500/30 text-primary-400 hover:bg-primary-500/10 rounded-xl transition-all"
           >
-            <MessageSquare className="w-4 h-4" />
+            <SlackIcon className="w-4 h-4" />
             Slack Thread
           </a>
         )}

@@ -3,7 +3,6 @@ import {
   ChevronRight,
   Clock,
   Database,
-  MessageSquare,
   RefreshCw,
   User,
 } from 'lucide-react';
@@ -13,6 +12,7 @@ import {
   DEFAULT_SEVERITY_CONFIG,
   STATUS_CONFIG,
 } from '../data/constants';
+import { SlackIcon } from './BrandIcons';
 
 interface IncidentCardProps {
   incident: IncidentSummary;
@@ -86,7 +86,7 @@ export function IncidentCard({ incident, onClick }: IncidentCardProps) {
                 className="flex items-center gap-1 text-primary-400 hover:text-primary-300 transition-colors"
                 title="View Slack thread"
               >
-                <MessageSquare className="w-3.5 h-3.5" />
+                <SlackIcon className="w-3.5 h-3.5" />
                 Slack
               </a>
             )}

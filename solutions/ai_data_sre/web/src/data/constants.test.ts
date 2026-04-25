@@ -26,12 +26,13 @@ describe('SEVERITY_ORDER', () => {
 describe('SEVERITY_CONFIG', () => {
   it('has config for all severity levels', () => {
     for (const sev of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']) {
-      expect(SEVERITY_CONFIG[sev]).toBeDefined();
-      expect(SEVERITY_CONFIG[sev]).toHaveProperty('bg');
-      expect(SEVERITY_CONFIG[sev]).toHaveProperty('text');
-      expect(SEVERITY_CONFIG[sev]).toHaveProperty('border');
-      expect(SEVERITY_CONFIG[sev]).toHaveProperty('badge');
-      expect(SEVERITY_CONFIG[sev]).toHaveProperty('dot');
+      const config = SEVERITY_CONFIG[sev];
+      expect(config).toBeDefined();
+      expect(config).toHaveProperty('bg');
+      expect(config).toHaveProperty('text');
+      expect(config).toHaveProperty('border');
+      expect(config).toHaveProperty('badge');
+      expect(config).toHaveProperty('dot');
     }
   });
 });
@@ -47,9 +48,10 @@ describe('DEFAULT_SEVERITY_CONFIG', () => {
 describe('STATUS_CONFIG', () => {
   it('has config for all statuses', () => {
     for (const s of ['detected', 'investigating', 'reported', 'acknowledged', 'resolved']) {
-      expect(STATUS_CONFIG[s]).toBeDefined();
-      expect(STATUS_CONFIG[s]).toHaveProperty('color');
-      expect(STATUS_CONFIG[s]).toHaveProperty('label');
+      const config = STATUS_CONFIG[s];
+      expect(config).toBeDefined();
+      expect(config).toHaveProperty('color');
+      expect(config).toHaveProperty('label');
     }
   });
 
