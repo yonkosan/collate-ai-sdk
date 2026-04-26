@@ -36,7 +36,7 @@ interface SidebarProps {
 
 export function Sidebar({ incidents, activeNav, onNavChange, isOpen, onToggle }: SidebarProps) {
   const activeCount = incidents.filter(
-    (i) => i.status !== 'resolved'
+    (i) => i.status !== 'resolved' && i.status !== 'resolved_verified'
   ).length;
 
   return (
@@ -120,7 +120,7 @@ export function Sidebar({ incidents, activeNav, onNavChange, isOpen, onToggle }:
                 {incidents.slice(0, 5).map((inc) => {
                   const sev = SEVERITY_CONFIG[inc.severity] ?? DEFAULT_SEVERITY_CONFIG;
                   const shortTable = inc.root_cause_table.split('.').pop() ?? inc.root_cause_table;
-                  const isResolved = inc.status === 'resolved';
+                  const isResolved = inc.status === 'resolved' || inc.status === 'resolved_verified';
                   return (
                     <button
                       key={inc.id}

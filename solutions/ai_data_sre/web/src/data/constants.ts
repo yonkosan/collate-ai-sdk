@@ -76,6 +76,9 @@ export const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   investigating: { color: 'text-warning', label: 'Investigating' },
   reported: { color: 'text-info', label: 'Reported' },
   acknowledged: { color: 'text-primary-400', label: 'Acknowledged' },
+  resolve_pending: { color: 'text-warning', label: 'Verifying…' },
+  resolved_verified: { color: 'text-success', label: 'Verified' },
+  resolved_failed: { color: 'text-danger', label: 'Verify Failed' },
   resolved: { color: 'text-success', label: 'Resolved' },
 };
 

@@ -139,13 +139,13 @@ export default function App() {
   ).length;
 
   const activeIncidents = incidents.filter(
-    (i) => i.status === 'detected' || i.status === 'investigating' || i.status === 'reported'
+    (i) => i.status === 'detected' || i.status === 'investigating' || i.status === 'reported' || i.status === 'resolved_failed'
   );
   const assignedIncidents = incidents.filter(
-    (i) => i.status === 'acknowledged' || (i.assigned_to && i.status !== 'resolved')
+    (i) => i.status === 'acknowledged' || i.status === 'resolve_pending' || (i.assigned_to && i.status !== 'resolved' && i.status !== 'resolved_failed')
   );
   const resolvedIncidents = incidents.filter(
-    (i) => i.status === 'resolved'
+    (i) => i.status === 'resolved' || i.status === 'resolved_verified'
   );
 
   const recurringCount = allIncidents.filter((i) => i.has_recurring_failures).length;

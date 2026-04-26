@@ -3,6 +3,7 @@ import type {
   IncidentSummary,
   PipelineResponse,
   UserInfo,
+  VerificationResult,
 } from './types';
 
 const BASE = '/api';
@@ -19,6 +20,16 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+export interface ResolveResponse {
+  status: 'resolved' | 'rejected';
+  incident_id: string;
+  resolved_by?: string;
+  resolution_note?: string;
+  message?: string;
+  still_failing_tests?: string[];
+  verification?: VerificationResult | null;
+}
+
 export const api = {
   runPipeline: () => fetchJSON<PipelineResponse>('/pipeline/run', { method: 'POST' }),
   listIncidents: () => fetchJSON<IncidentSummary[]>('/incidents'),
@@ -33,11 +44,27 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ assignee }),
     }),
-  resolveIncident: (id: string, resolutionNote: string, resolvedBy = 'admin') =>
-    fetchJSON<{ status: string }>(`/incidents/${id}/resolve`, {
+  resolveIncident: (
+    id: string,
+    resolutionNote: string,
+    resolvedBy = 'admin',
+    resolutionCategory = '',
+    skipVerification = false,
+  ) =>
+    fetchJSON<ResolveResponse>(`/incidents/${id}/resolve`, {
       method: 'PUT',
-      body: JSON.stringify({ resolution_note: resolutionNote, resolved_by: resolvedBy }),
+      body: JSON.stringify({
+        resolution_note: resolutionNote,
+        resolved_by: resolvedBy,
+        resolution_category: resolutionCategory,
+        skip_verification: skipVerification,
+      }),
     }),
+  verifyIncident: (id: string) =>
+    fetchJSON<{ passed: boolean; message: string; still_failing_tests: string[]; verified_at: string }>(
+      `/incidents/${id}/verify`,
+      { method: 'POST' },
+    ),
   listUsers: (q = '') => fetchJSON<UserInfo[]>(`/users${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   listTeams: () => fetchJSON<UserInfo[]>('/teams'),
   getOmLink: (entityType: string, fqn: string) =>

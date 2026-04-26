@@ -14,7 +14,7 @@ from typing import Optional
 import httpx
 
 from core.config import DataPulseConfig
-from core.models import Incident
+from core.models import Incident, ResolutionVerification
 
 logger = logging.getLogger("datapulse.slack")
 
@@ -167,6 +167,146 @@ class SlackNotifier:
             incident.slack_thread_ts,
             f"🎉 *Resolved by {by}*\n_{note}_",
         )
+
+    def post_reassigned(self, incident: Incident, from_user: str, to_user: str) -> None:
+        """Post a re-assignment update to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+        self._post_reply(
+            incident.slack_thread_ts,
+            f"🔄 *Re-assigned from {from_user} → {to_user}*",
+        )
+
+    def post_verification_passed(self, incident: Incident) -> None:
+        """Post verification success to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+        vr = incident.verification_result or {}
+        text = "✅ *DQ Verification Passed* — All tests now passing."
+        confidence = vr.get("confidence", "")
+        if confidence:
+            text += f"\n\n📝 *Note Alignment:* {confidence}"
+            reason = vr.get("confidence_reason", "")
+            if reason:
+                text += f"\n_{reason}_"
+        self._post_reply(incident.slack_thread_ts, text)
+
+    def post_verification_failed(self, incident: Incident, message: str) -> None:
+        """Post verification failure to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+        self._post_reply(
+            incident.slack_thread_ts,
+            f"❌ *Resolution Rejected — DQ Check Still Failing*\n{message}",
+        )
+
+    def post_resolution_summary(self, incident: Incident) -> None:
+        """Post a final resolution summary card to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+
+        created = incident.created_at
+        resolved = incident.resolved_at
+        if created and resolved:
+            delta = resolved - created
+            hours = int(delta.total_seconds() // 3600)
+            mins = int((delta.total_seconds() % 3600) // 60)
+            ttr = f"{hours}h {mins}m" if hours > 0 else f"{mins}m"
+        else:
+            ttr = "N/A"
+
+        actors = []
+        if incident.acknowledged_by:
+            actors.append(f"Acknowledged by {incident.acknowledged_by}")
+        if incident.assigned_to:
+            actors.append(f"Assigned to {incident.assigned_to}")
+        if incident.resolved_by:
+            actors.append(f"Resolved by {incident.resolved_by}")
+
+        vr = incident.verification_result or {}
+        verify_line = "✅ Verified" if vr.get("verified") else "⚠️ Not verified"
+
+        text = (
+            "📋 *Resolution Summary*\n"
+            f"• *Time to Resolution:* {ttr}\n"
+            f"• *Actors:* {' → '.join(actors) if actors else 'N/A'}\n"
+            f"• *Verification:* {verify_line}\n"
+            f"• *Category:* {incident.resolution_category or 'Not specified'}\n"
+            f"• *Note:* _{incident.resolution_note or 'None'}_"
+        )
+        self._post_reply(incident.slack_thread_ts, text)
+
+    def post_reassigned(self, incident: Incident, previous: str, new: str) -> None:
+        """Post a re-assignment update to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+        self._post_reply(
+            incident.slack_thread_ts,
+            f"🔄 *Re-assigned from {previous} → {new}*",
+        )
+
+    def post_verification_result(
+        self, incident: Incident, result: ResolutionVerification
+    ) -> None:
+        """Post the DQ verification result to the thread."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+
+        if result.verified:
+            confidence_text = f" Confidence: *{result.confidence}*" if result.confidence else ""
+            reason = f"\n_{result.confidence_reason}_" if result.confidence_reason else ""
+            text = f"✅ *Resolution verified* — all DQ checks now passing.{confidence_text}{reason}"
+        else:
+            failing = ", ".join(f"`{t}`" for t in result.still_failing_tests)
+            text = (
+                f"❌ *Resolution rejected* — DQ checks still failing.\n"
+                f"Failing tests: {failing}\n"
+                f"Latest error: _{result.latest_error}_"
+            )
+
+        self._post_reply(incident.slack_thread_ts, text)
+
+    def post_resolution_summary(self, incident: Incident) -> None:
+        """Post a final summary card when an incident is resolved."""
+        if not self._enabled or not incident.slack_thread_ts:
+            return
+        if not incident.resolved_at or not incident.created_at:
+            return
+
+        ttr_seconds = (incident.resolved_at - incident.created_at).total_seconds()
+        if ttr_seconds < 3600:
+            ttr = f"{int(ttr_seconds / 60)}m"
+        elif ttr_seconds < 86400:
+            ttr = f"{ttr_seconds / 3600:.1f}h"
+        else:
+            ttr = f"{ttr_seconds / 86400:.1f}d"
+
+        actors = set()
+        if incident.acknowledged_by:
+            actors.add(incident.acknowledged_by)
+        if incident.assigned_to:
+            actors.add(incident.assigned_to)
+        if incident.resolved_by:
+            actors.add(incident.resolved_by)
+
+        confidence_line = ""
+        if incident.verification and incident.verification.confidence:
+            confidence_line = f"\n*Verification:* {incident.verification.confidence}"
+
+        category_line = ""
+        if incident.root_cause_category:
+            category_line = f"\n*Root Cause Category:* {incident.root_cause_category}"
+
+        text = (
+            f"📋 *Incident Summary*\n"
+            f"*Time to Resolution:* {ttr}\n"
+            f"*Involved:* {', '.join(sorted(actors)) or 'N/A'}"
+            f"{confidence_line}"
+            f"{category_line}\n"
+            f"*Resolution:* _{incident.resolution_note}_"
+        )
+
+        self._post_reply(incident.slack_thread_ts, text)
 
     def _post_message(self, text: str, blocks: list) -> Optional[str]:
         """Post a top-level message and return thread_ts."""

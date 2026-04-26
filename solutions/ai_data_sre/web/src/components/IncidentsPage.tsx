@@ -22,9 +22,10 @@ export function IncidentsPage({ currentIncidents, pastIncidents, onOpen }: Incid
   const [search, setSearch] = useState('');
 
   const all = [...currentIncidents, ...pastIncidents];
+  const isResolvedStatus = (s: string) => s === 'resolved' || s === 'resolved_verified';
   const filtered = all.filter((inc) => {
-    if (filter === 'active' && inc.status === 'resolved') return false;
-    if (filter === 'resolved' && inc.status !== 'resolved') return false;
+    if (filter === 'active' && isResolvedStatus(inc.status)) return false;
+    if (filter === 'resolved' && !isResolvedStatus(inc.status)) return false;
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -36,8 +37,8 @@ export function IncidentsPage({ currentIncidents, pastIncidents, onOpen }: Incid
     return true;
   });
 
-  const activeCount = all.filter((i) => i.status !== 'resolved').length;
-  const resolvedCount = all.filter((i) => i.status === 'resolved').length;
+  const activeCount = all.filter((i) => !isResolvedStatus(i.status)).length;
+  const resolvedCount = all.filter((i) => isResolvedStatus(i.status)).length;
 
   return (
     <div className="h-full flex flex-col">
@@ -102,7 +103,7 @@ export function IncidentsPage({ currentIncidents, pastIncidents, onOpen }: Incid
             const shortTable = inc.root_cause_table.split('.').pop() ?? inc.root_cause_table;
             const isPast = inc.id.startsWith('hist-');
 
-            const isResolved = inc.status === 'resolved';
+            const isResolved = inc.status === 'resolved' || inc.status === 'resolved_verified';
 
             return (
               <button

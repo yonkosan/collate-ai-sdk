@@ -78,6 +78,26 @@ export interface IncidentReport {
   generated_at: string;
 }
 
+export interface IncidentEvent {
+  action: string;
+  actor: string;
+  detail: string;
+  timestamp: string;
+}
+
+export interface NoteAlignment {
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  explanation: string;
+}
+
+export interface VerificationResult {
+  passed: boolean;
+  message: string;
+  still_failing_tests: string[];
+  verified_at: string;
+  note_alignment: NoteAlignment | null;
+}
+
 export interface IncidentDetail {
   id: string;
   title: string;
@@ -92,6 +112,9 @@ export interface IncidentDetail {
   resolved_by: string | null;
   slack_thread_url: string | null;
   resolution_note: string | null;
+  resolution_category: string | null;
+  verification_result: VerificationResult | null;
+  events: IncidentEvent[];
   acknowledged_at: string | null;
   resolved_at: string | null;
   created_at: string;

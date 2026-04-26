@@ -97,7 +97,12 @@ describe('api.resolveIncident', () => {
 
     expect(mockFetch).toHaveBeenCalledWith('/api/incidents/inc-1/resolve', expect.objectContaining({
       method: 'PUT',
-      body: JSON.stringify({ resolution_note: 'Fixed the data', resolved_by: 'alice' }),
+      body: JSON.stringify({
+        resolution_note: 'Fixed the data',
+        resolved_by: 'alice',
+        resolution_category: '',
+        skip_verification: false,
+      }),
     }));
   });
 });

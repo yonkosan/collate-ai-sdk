@@ -87,6 +87,10 @@ class AssignRequest(BaseModel):
 class ResolveRequest(BaseModel):
     resolution_note: str
     resolved_by: str = "admin"
+    resolution_category: str = ""
+    skip_verification: bool = False
+    resolution_category: str = ""
+    skip_verification: bool = False
 
 
 class IncidentSummary(BaseModel):
@@ -273,13 +277,14 @@ def acknowledge_incident(incident_id: str, body: AckRequest):
     inc.transition(IncidentStatus.ACKNOWLEDGED)
     inc.acknowledged_at = datetime.now(timezone.utc)
     inc.acknowledged_by = body.acknowledged_by
+    inc.add_event("acknowledged", actor=body.acknowledged_by)
 
     # Slack update
     slack = _get_slack()
     slack.post_acknowledged(inc, body.acknowledged_by)
 
     # OM hybrid — update test case incident status
-    _push_om_incident_status(inc, "Ack")
+    _push_om_incident_status(inc, "Ack", body.acknowledged_by)
 
     return {
         "status": "acknowledged",
@@ -295,15 +300,20 @@ def assign_incident(incident_id: str, body: AssignRequest):
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
 
+    previous_assignee = inc.assigned_to
     inc.assigned_to = body.assignee
     inc.updated_at = datetime.now(timezone.utc)
+    inc.add_event("assigned", actor="admin", detail=f"Assigned to {body.assignee}")
 
     # Slack update
     slack = _get_slack()
-    slack.post_assigned(inc, body.assignee)
+    if previous_assignee:
+        slack.post_reassigned(inc, previous_assignee, body.assignee)
+    else:
+        slack.post_assigned(inc, body.assignee)
 
     # OM hybrid — update test case incident status
-    _push_om_incident_status(inc, "Assigned")
+    _push_om_incident_status(inc, "Assigned", body.assignee)
 
     return {
         "status": "assigned",
@@ -314,28 +324,110 @@ def assign_incident(incident_id: str, body: AssignRequest):
 
 @app.put("/api/incidents/{incident_id}/resolve")
 def resolve_incident(incident_id: str, body: ResolveRequest):
-    """Resolve an incident with a resolution note."""
+    """Resolve an incident with DQ verification.
+
+    1. Re-checks the latest DQ test results from OpenMetadata
+    2. If tests still failing → rejects with details
+    3. If tests passing → validates resolution note alignment via LLM
+    4. Marks incident resolved with verification result
+    """
+    from core.verifier import Verifier
+
     inc = _incidents.get(incident_id)
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
 
+    inc.add_event("resolve_attempted", actor=body.resolved_by, detail=body.resolution_note[:200])
+
+    # Skip verification path (force resolve)
+    if body.skip_verification:
+        inc.transition(IncidentStatus.RESOLVED)
+        inc.resolution_note = body.resolution_note
+        inc.resolved_by = body.resolved_by
+        inc.resolved_at = datetime.now(timezone.utc)
+        if body.resolution_category:
+            inc.resolution_category = body.resolution_category
+        inc.add_event("resolved", actor=body.resolved_by, detail="Verification skipped")
+
+        slack = _get_slack()
+        slack.post_resolved(inc, body.resolved_by, body.resolution_note)
+        _push_om_incident_status(inc, "Resolved", body.resolved_by)
+
+        return {
+            "status": "resolved",
+            "incident_id": incident_id,
+            "resolved_by": body.resolved_by,
+            "resolution_note": body.resolution_note,
+            "verification": None,
+        }
+
+    # Verification path: re-check DQ tests
+    config = _get_config()
+    verifier = Verifier(config)
+    result = verifier.verify_resolution(inc, body.resolution_note)
+
+    verification_dict = result.model_dump(mode="json")
+    inc.verification_result = verification_dict
+
+    slack = _get_slack()
+
+    if not result.verified:
+        # Tests still failing — reject resolution
+        inc.add_event(
+            "resolve_rejected",
+            actor="system",
+            detail=f"Still failing: {', '.join(result.still_failing_tests)}",
+        )
+        slack.post_verification_failed(inc, result.latest_error)
+
+        return {
+            "status": "rejected",
+            "incident_id": incident_id,
+            "message": result.latest_error,
+            "still_failing_tests": result.still_failing_tests,
+            "verification": verification_dict,
+        }
+
+    # All tests passing — resolve
     inc.transition(IncidentStatus.RESOLVED)
     inc.resolution_note = body.resolution_note
     inc.resolved_by = body.resolved_by
     inc.resolved_at = datetime.now(timezone.utc)
+    if body.resolution_category:
+        inc.resolution_category = body.resolution_category
+    inc.add_event("resolved", actor=body.resolved_by, detail=body.resolution_note[:200])
 
-    # Slack update
-    slack = _get_slack()
     slack.post_resolved(inc, body.resolved_by, body.resolution_note)
-
-    # OM hybrid — update test case incident status
-    _push_om_incident_status(inc, "Resolved")
+    slack.post_verification_passed(inc)
+    slack.post_resolution_summary(inc)
+    _push_om_incident_status(inc, "Resolved", body.resolved_by)
 
     return {
         "status": "resolved",
         "incident_id": incident_id,
         "resolved_by": body.resolved_by,
         "resolution_note": body.resolution_note,
+        "verification": verification_dict,
+    }
+
+
+@app.post("/api/incidents/{incident_id}/verify")
+def verify_incident(incident_id: str):
+    """Dry-run verification: check if DQ tests are passing without resolving."""
+    from core.verifier import Verifier
+
+    inc = _incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    verifier = Verifier(_get_config())
+    result = verifier.verify_resolution(inc, "", skip_note_validation=True)
+
+    return {
+        "passed": result.passed,
+        "message": result.message,
+        "still_failing_tests": result.still_failing_tests,
+        "verified_at": result.verified_at,
     }
 
 
@@ -415,8 +507,12 @@ def get_app_config():
 # ─── OM Hybrid helpers ──────────────────────────────────────────────────
 
 
-def _push_om_incident_status(inc: Incident, status_label: str) -> None:
-    """Best-effort push of incident status to OM testCaseIncidentStatus API."""
+def _push_om_incident_status(inc: Incident, status_label: str, actor: str = "admin") -> None:
+    """Best-effort push of incident status to OM testCaseIncidentStatus API.
+
+    Pushes for ALL failing test cases (not just the first) and uses the actual
+    actor name (not hardcoded "admin").
+    """
     config = _get_config()
     if not inc.failures:
         return
@@ -426,24 +522,30 @@ def _push_om_incident_status(inc: Incident, status_label: str) -> None:
             headers=config.api_headers,
             timeout=10.0,
         ) as client:
-            test_id = inc.failures[0].test_case_id
-            resp = client.get(
-                f"/api/v1/dataQuality/testCases/{test_id}",
-                params={"fields": "incidentId"},
-            )
-            if resp.status_code == 200:
+            for failure in inc.failures:
+                test_id = failure.test_case_id
+                resp = client.get(
+                    f"/api/v1/dataQuality/testCases/{test_id}",
+                    params={"fields": "incidentId"},
+                )
+                if resp.status_code != 200:
+                    continue
                 tc_data = resp.json()
                 incident_id = tc_data.get("incidentId")
-                if incident_id:
-                    client.put(
-                        f"/api/v1/dataQuality/testCases/testCaseIncidentStatus/{incident_id}",
-                        json={
-                            "testCaseResolutionStatusType": status_label,
-                            "testCaseResolutionStatusDetails": {
-                                "resolvedBy": {"name": "admin", "type": "user"},
-                            },
+                if not incident_id:
+                    continue
+                client.put(
+                    f"/api/v1/dataQuality/testCases/testCaseIncidentStatus/{incident_id}",
+                    json={
+                        "testCaseResolutionStatusType": status_label,
+                        "testCaseResolutionStatusDetails": {
+                            "resolvedBy": {"name": actor, "type": "user"},
                         },
-                    )
-                    logger.info("Pushed OM incident status '%s' for test %s", status_label, test_id)
+                    },
+                )
+                logger.info(
+                    "Pushed OM incident status '%s' for test %s (by %s)",
+                    status_label, test_id, actor,
+                )
     except Exception as exc:
         logger.warning("Failed to push OM incident status: %s", exc)
