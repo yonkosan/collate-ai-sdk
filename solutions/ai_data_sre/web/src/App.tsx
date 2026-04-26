@@ -155,6 +155,19 @@ export default function App() {
   const currentCritical = incidents.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
+
+  // Sorted for mini-lists: active first (newest), then resolved (newest)
+  const allSorted = [...allIncidents].sort((a, b) => {
+    const aResolved = a.status === 'resolved' ? 1 : 0;
+    const bResolved = b.status === 'resolved' ? 1 : 0;
+    if (aResolved !== bResolved) return aResolved - bResolved;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+  const critHighSorted = allSorted.filter(
+    (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
+  );
+  const recurringSorted = allSorted.filter((i) => i.has_recurring_failures);
+
   const currentPage = view.page;
 
   return (
@@ -203,6 +216,7 @@ export default function App() {
                       value={allIncidents.length}
                       icon={<AlertTriangle className="w-4 h-4" />}
                       subtitle={`${incidents.length} active · ${PAST_INCIDENTS.length} resolved`}
+                      items={allSorted}
                       sparkData={[2, 1, 4, 1, 3, PAST_INCIDENTS.length, allIncidents.length]}
                       sparkColor="#8b5cf6"
                       accentColor="text-primary-400"
@@ -212,6 +226,7 @@ export default function App() {
                       value={criticalCount}
                       icon={<Shield className="w-4 h-4" />}
                       subtitle={`${currentCritical} active · ${pastCritical} resolved`}
+                      items={critHighSorted}
                       sparkData={[1, 2, 1, 3, pastCritical, criticalCount]}
                       sparkColor="#fb7185"
                       accentColor="text-danger"
@@ -221,6 +236,8 @@ export default function App() {
                       value={recurringCount}
                       icon={<RefreshCw className="w-4 h-4" />}
                       subtitle={recurringCount > 0 ? `${recurringCount} test${recurringCount !== 1 ? 's' : ''} failed 2+ times` : 'No repeat failures'}
+                      items={recurringSorted}
+                      showRecurring
                       sparkData={[0, 1, 0, 2, 1, recurringCount]}
                       sparkColor="#fbbf24"
                       accentColor="text-warning"
