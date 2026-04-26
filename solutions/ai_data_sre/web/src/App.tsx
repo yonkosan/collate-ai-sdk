@@ -141,6 +141,12 @@ export default function App() {
   }, []);
 
   const runPipelineFallback = useCallback(async () => {
+    const isDemo = await initDemoCheck();
+    if (isDemo) {
+      setDemoMode(true);
+      runDemoPipeline();
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
