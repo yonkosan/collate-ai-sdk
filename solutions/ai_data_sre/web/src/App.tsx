@@ -1,25 +1,29 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Crosshair,
+  Eye,
   RefreshCw,
   Shield,
   UserCheck,
 } from 'lucide-react';
-import { api } from './api';
+import { api, initDemoCheck } from './api';
 import type { IncidentDetail, IncidentSummary } from './types';
 import { sortBySeverity } from './data/constants';
 import { PAST_INCIDENTS } from './data/seedIncidents';
+import { DEMO_ACTIVE_SUMMARIES } from './data/seedDetails';
 import { useTheme } from './hooks/useTheme';
 import { Sidebar } from './components/Sidebar';
 import { HeaderBar } from './components/HeaderBar';
-import { StatCard } from './components/StatCard';
+import { StatCard, InfoTooltip } from './components/StatCard';
 import { PromoCard } from './components/PromoCard';
 import { IncidentSection } from './components/IncidentSection';
 import { IncidentDetailPanel } from './components/IncidentDetailPanel';
 import { EmptyState } from './components/EmptyState';
 import { IncidentsPage } from './components/IncidentsPage';
-import { ReportsPage, SettingsPage } from './components/PlaceholderPages';
+import { ReportsPage } from './components/ReportsPage';
+import { SettingsPage } from './components/PlaceholderPages';
 import { UnifiedLineagePage } from './components/UnifiedLineagePage';
 
 type NavPage = 'dashboard' | 'incidents' | 'lineage' | 'reports' | 'settings';
@@ -35,9 +39,58 @@ export default function App() {
   const [pipelineRan, setPipelineRan] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const runPipelineSSE = useCallback(() => {
+  // Check if backend is available on mount
+  useEffect(() => {
+    initDemoCheck().then((isDemo) => {
+      setDemoMode(isDemo);
+    });
+  }, []);
+
+  /* ── Simulated pipeline for demo mode ──────────────── */
+  const runDemoPipeline = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setIncidents([]);
+    const phases = [
+      'Scanning OpenMetadata for DQ failures…',
+      'Detected 5 failing test cases across 3 tables…',
+      'Tracing column-level lineage for root cause analysis…',
+      'Root cause found: raw_orders.order_date — 847 future-dated rows',
+      'Mapping blast radius — 8 downstream assets affected…',
+      'Generating AI incident reports with GPT-4o-mini…',
+    ];
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i < phases.length) {
+        setPipelinePhase(phases[i]!);
+        // Drip-feed incidents at specific phases
+        if (i === 1) {
+          setIncidents(sortBySeverity([DEMO_ACTIVE_SUMMARIES[0]!]));
+        } else if (i === 3) {
+          setIncidents(sortBySeverity([DEMO_ACTIVE_SUMMARIES[0]!, DEMO_ACTIVE_SUMMARIES[1]!]));
+        } else if (i === 4) {
+          setIncidents(sortBySeverity([...DEMO_ACTIVE_SUMMARIES]));
+        }
+        i++;
+      } else {
+        clearInterval(timer);
+        setLoading(false);
+        setPipelinePhase(null);
+        setPipelineRan(true);
+      }
+    }, 1200);
+  }, []);
+
+  const runPipelineSSE = useCallback(async () => {
+    const isDemo = await initDemoCheck();
+    if (isDemo) {
+      setDemoMode(true);
+      runDemoPipeline();
+      return;
+    }
     setLoading(true);
     setError(null);
     setIncidents([]);
@@ -148,13 +201,32 @@ export default function App() {
     (i) => i.status === 'resolved' || i.status === 'resolved_verified'
   );
 
-  const recurringCount = allIncidents.filter((i) => i.has_recurring_failures).length;
   const pastCritical = PAST_INCIDENTS.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
   const currentCritical = incidents.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   ).length;
+
+  // Unique root causes from active incidents
+  const rootCauseData = useMemo(() => {
+    const activeIncs = incidents.filter(
+      (i) => i.status !== 'resolved' && i.status !== 'resolved_verified'
+    );
+    const causeSet = new Set<string>();
+    for (const inc of activeIncs) {
+      const table = inc.root_cause_table.split('.').pop() ?? inc.root_cause_table;
+      if (inc.root_cause_column) {
+        causeSet.add(`${table}.${inc.root_cause_column}`);
+      } else {
+        causeSet.add(table);
+      }
+    }
+    return {
+      uniqueTables: new Set(activeIncs.map((i) => i.root_cause_table)).size,
+      causes: Array.from(causeSet).sort(),
+    };
+  }, [incidents]);
 
   // Sorted for mini-lists: active first (newest), then resolved (newest)
   const allSorted = [...allIncidents].sort((a, b) => {
@@ -166,7 +238,6 @@ export default function App() {
   const critHighSorted = allSorted.filter(
     (i) => i.severity === 'CRITICAL' || i.severity === 'HIGH'
   );
-  const recurringSorted = allSorted.filter((i) => i.has_recurring_failures);
 
   const currentPage = view.page;
 
@@ -205,6 +276,17 @@ export default function App() {
               </div>
             )}
 
+            {/* Demo mode banner */}
+            {demoMode && (
+              <div className="flex-shrink-0 mb-4 px-4 py-2.5 bg-primary-500/10 border border-primary-500/20 rounded-xl flex items-center gap-3 animate-fade-in">
+                <Eye className="w-4 h-4 text-primary-400 flex-shrink-0" />
+                <p className="text-sm text-primary-400">
+                  <span className="font-semibold">Interactive Demo</span>
+                  <span className="text-content-muted"> — Running with sample data. Connect to a live backend + OpenMetadata for full functionality.</span>
+                </p>
+              </div>
+            )}
+
             {/* === DASHBOARD === */}
             {currentPage === 'dashboard' && (
               <div className="flex-1 flex flex-col min-h-0 animate-fade-in">
@@ -216,6 +298,7 @@ export default function App() {
                       value={allIncidents.length}
                       icon={<AlertTriangle className="w-4 h-4" />}
                       subtitle={`${incidents.length} active · ${PAST_INCIDENTS.length} resolved`}
+                      tooltip="Total number of data quality incidents detected across all pipeline runs — including both currently active and historically resolved incidents."
                       items={allSorted}
                       sparkData={[2, 1, 4, 1, 3, PAST_INCIDENTS.length, allIncidents.length]}
                       sparkColor="#8b5cf6"
@@ -226,22 +309,41 @@ export default function App() {
                       value={criticalCount}
                       icon={<Shield className="w-4 h-4" />}
                       subtitle={`${currentCritical} active · ${pastCritical} resolved`}
+                      tooltip="Count of incidents rated Critical or High severity. Severity is determined by blast radius depth, number of downstream assets affected, and whether executive-level dashboards are impacted."
                       items={critHighSorted}
                       sparkData={[1, 2, 1, 3, pastCritical, criticalCount]}
                       sparkColor="#fb7185"
                       accentColor="text-danger"
                     />
-                    <StatCard
-                      label="Recurring"
-                      value={recurringCount}
-                      icon={<RefreshCw className="w-4 h-4" />}
-                      subtitle={recurringCount > 0 ? `${recurringCount} test${recurringCount !== 1 ? 's' : ''} failed 2+ times` : 'No repeat failures'}
-                      items={recurringSorted}
-                      showRecurring
-                      sparkData={[0, 1, 0, 2, 1, recurringCount]}
-                      sparkColor="#fbbf24"
-                      accentColor="text-warning"
-                    />
+                    {/* Unique Root Causes card */}
+                    <div className="relative overflow-hidden rounded-xl border border-border-subtle bg-surface-elevated p-3.5 transition-all hover:border-amber-500/30 hover:shadow-card-hover group flex flex-col" style={{ minHeight: 160 }}>
+                      <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none" />
+                      <div className="relative z-10 flex flex-col h-full">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-surface-soft border border-border-subtle text-amber-400">
+                            <Crosshair className="w-4 h-4" />
+                          </span>
+                          <InfoTooltip text="Unique upstream source tables identified as the origin of cascading DQ failures. Each root cause is traced via column-level lineage — fixing these tables resolves all downstream symptoms." />
+                        </div>
+                        <p className="text-[10px] font-medium text-content-muted uppercase tracking-wider">Root Causes</p>
+                        <p className="text-lg font-bold text-content-primary tracking-tight leading-tight">{rootCauseData.uniqueTables}</p>
+                        <p className="text-[10px] text-content-muted mt-0.5">
+                          {rootCauseData.uniqueTables === 1 ? '1 source table' : `${rootCauseData.uniqueTables} source tables`} identified
+                        </p>
+                        {rootCauseData.causes.length > 0 && (
+                          <div className="mt-auto pt-2 flex flex-wrap gap-1">
+                            {rootCauseData.causes.slice(0, 6).map((col) => (
+                              <span key={col} className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] font-mono text-amber-400 leading-tight">
+                                {col}
+                              </span>
+                            ))}
+                            {rootCauseData.causes.length > 6 && (
+                              <span className="text-[10px] text-content-faint">+{rootCauseData.causes.length - 6} more</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     <PromoCard onRunPipeline={runPipelineSSE} loading={loading} />
                   </div>
                 )}
@@ -333,7 +435,7 @@ export default function App() {
 
             {/* === PLACEHOLDER PAGES === */}
             {currentPage === 'reports' && (
-              <div className="flex-1 min-h-0"><ReportsPage /></div>
+              <div className="flex-1 min-h-0"><ReportsPage incidents={allIncidents} /></div>
             )}
             {currentPage === 'settings' && (
               <div className="flex-1 min-h-0"><SettingsPage /></div>
