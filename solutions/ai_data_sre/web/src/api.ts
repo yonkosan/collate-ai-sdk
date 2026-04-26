@@ -17,15 +17,24 @@ const BASE = '/api';
 
 let _demoMode: boolean | null = null;
 
+function isStaticHost(): boolean {
+  // No backend on Vercel, Netlify, GitHub Pages, or any non-localhost host
+  const h = window.location.hostname;
+  return h !== 'localhost' && h !== '127.0.0.1';
+}
+
 async function checkDemoMode(): Promise<boolean> {
   if (_demoMode !== null) return _demoMode;
+  // Fast path: if not running locally, there's no backend
+  if (isStaticHost()) {
+    _demoMode = true;
+    return true;
+  }
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const resp = await fetch(`${BASE}/health`, { signal: controller.signal });
     clearTimeout(timer);
-    // Vercel SPA fallback serves index.html (200 + text/html) for unknown routes.
-    // A real backend returns JSON, so check content-type to distinguish.
     const ct = resp.headers.get('content-type') ?? '';
     _demoMode = !resp.ok || !ct.includes('application/json');
   } catch {
