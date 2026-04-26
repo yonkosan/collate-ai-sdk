@@ -20,7 +20,10 @@ let _demoMode: boolean | null = null;
 async function checkDemoMode(): Promise<boolean> {
   if (_demoMode !== null) return _demoMode;
   try {
-    const resp = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(3000) });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(`${BASE}/health`, { signal: controller.signal });
+    clearTimeout(timer);
     _demoMode = !resp.ok;
   } catch {
     _demoMode = true;
@@ -39,6 +42,10 @@ export function initDemoCheck(): Promise<boolean> {
 /* ── Network layer ───────────────────────────────────────────────────── */
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  // Safety net: if demo mode, never make real API calls
+  if (await checkDemoMode()) {
+    throw new Error('Demo mode — no backend available');
+  }
   const resp = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
@@ -75,27 +82,33 @@ export const api = {
     if (await checkDemoMode()) {
       const d = getDemoDetail(id);
       if (d) return d;
+      throw new Error(`Incident ${id} not found in demo data`);
     }
     return fetchJSON<IncidentDetail>(`/incidents/${id}`);
   },
-  acknowledgeIncident: (id: string, acknowledgedBy = 'admin') =>
-    fetchJSON<{ status: string }>(`/incidents/${id}/ack`, {
+  acknowledgeIncident: async (id: string, acknowledgedBy = 'admin') => {
+    if (await checkDemoMode()) return { status: 'demo' };
+    return fetchJSON<{ status: string }>(`/incidents/${id}/ack`, {
       method: 'PUT',
       body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
-    }),
-  assignIncident: (id: string, assignee: string) =>
-    fetchJSON<{ status: string }>(`/incidents/${id}/assign`, {
+    });
+  },
+  assignIncident: async (id: string, assignee: string) => {
+    if (await checkDemoMode()) return { status: 'demo' };
+    return fetchJSON<{ status: string }>(`/incidents/${id}/assign`, {
       method: 'PUT',
       body: JSON.stringify({ assignee }),
-    }),
-  resolveIncident: (
+    });
+  },
+  resolveIncident: async (
     id: string,
     resolutionNote: string,
     resolvedBy = 'admin',
     resolutionCategory = '',
     skipVerification = false,
-  ) =>
-    fetchJSON<ResolveResponse>(`/incidents/${id}/resolve`, {
+  ) => {
+    if (await checkDemoMode()) return { status: 'resolved' as const, incident_id: id, resolved_by: resolvedBy, resolution_note: resolutionNote };
+    return fetchJSON<ResolveResponse>(`/incidents/${id}/resolve`, {
       method: 'PUT',
       body: JSON.stringify({
         resolution_note: resolutionNote,
@@ -103,36 +116,46 @@ export const api = {
         resolution_category: resolutionCategory,
         skip_verification: skipVerification,
       }),
-    }),
-  verifyIncident: (id: string) =>
-    fetchJSON<{ passed: boolean; message: string; still_failing_tests: string[]; verified_at: string }>(
+    });
+  },
+  verifyIncident: async (id: string) => {
+    if (await checkDemoMode()) return { passed: true, message: 'Demo mode — verification simulated', still_failing_tests: [] as string[], verified_at: new Date().toISOString() };
+    return fetchJSON<{ passed: boolean; message: string; still_failing_tests: string[]; verified_at: string }>(
       `/incidents/${id}/verify`,
       { method: 'POST' },
-    ),
-  suggestFix: (id: string) =>
-    fetchJSON<{
+    );
+  },
+  suggestFix: async (id: string) => {
+    if (await checkDemoMode()) return { incident_id: id, suggestions: [] as FixSuggestion[] };
+    return fetchJSON<{
       incident_id: string;
       suggestions: FixSuggestion[];
-    }>(`/incidents/${id}/suggest-fix`, { method: 'POST' }),
-  executeFix: (id: string, sql: string) =>
-    fetchJSON<FixResult>(`/incidents/${id}/execute-fix`, {
+    }>(`/incidents/${id}/suggest-fix`, { method: 'POST' });
+  },
+  executeFix: async (id: string, sql: string) => {
+    if (await checkDemoMode()) return { success: true, message: 'Demo mode — fix simulated', rows_affected: 0, executed_sql: sql, executed_at: new Date().toISOString() };
+    return fetchJSON<FixResult>(`/incidents/${id}/execute-fix`, {
       method: 'POST',
       body: JSON.stringify({ sql }),
-    }),
-  rerunTest: (id: string, testCaseId: string, testCaseName: string) =>
-    fetchJSON<RerunResult>(`/incidents/${id}/rerun-test`, {
+    });
+  },
+  rerunTest: async (id: string, testCaseId: string, testCaseName: string) => {
+    if (await checkDemoMode()) return { test_case_name: testCaseName, status: 'Success' as const, message: 'Demo mode — test simulated', timestamp: new Date().toISOString() };
+    return fetchJSON<RerunResult>(`/incidents/${id}/rerun-test`, {
       method: 'POST',
       body: JSON.stringify({ test_case_id: testCaseId, test_case_name: testCaseName }),
-    }),
-  addGuardrail: (
+    });
+  },
+  addGuardrail: async (
     id: string,
     name: string,
     testDefinition: string,
     entityLink: string,
     parameterValues: { name: string; value: string }[] = [],
     description = '',
-  ) =>
-    fetchJSON<GuardrailResult>(`/incidents/${id}/add-guardrail`, {
+  ) => {
+    if (await checkDemoMode()) return { success: true, message: 'Demo mode — guardrail simulated', test_case_name: name, test_case_id: 'demo', om_link: 'https://sandbox.open-metadata.org', created_at: new Date().toISOString() };
+    return fetchJSON<GuardrailResult>(`/incidents/${id}/add-guardrail`, {
       method: 'POST',
       body: JSON.stringify({
         name,
@@ -141,7 +164,8 @@ export const api = {
         parameter_values: parameterValues,
         description,
       }),
-    }),
+    });
+  },
   listUsers: async (q = ''): Promise<UserInfo[]> => {
     if (await checkDemoMode()) {
       return [
@@ -152,9 +176,14 @@ export const api = {
     }
     return fetchJSON<UserInfo[]>(`/users${q ? `?q=${encodeURIComponent(q)}` : ''}`);
   },
-  listTeams: () => fetchJSON<UserInfo[]>('/teams'),
-  getOmLink: (entityType: string, fqn: string) =>
-    fetchJSON<{ link: string }>(`/om/link/${entityType}/${fqn}`),
+  listTeams: async () => {
+    if (await checkDemoMode()) return [{ name: 'data-engineering', display_name: 'Data Engineering' }, { name: 'analytics', display_name: 'Analytics' }];
+    return fetchJSON<UserInfo[]>('/teams');
+  },
+  getOmLink: async (entityType: string, fqn: string) => {
+    if (await checkDemoMode()) return { link: `https://sandbox.open-metadata.org/${entityType}/${fqn}` };
+    return fetchJSON<{ link: string }>(`/om/link/${entityType}/${fqn}`);
+  },
   getConfig: async (): Promise<{ om_base_url: string }> => {
     if (await checkDemoMode()) return { om_base_url: 'https://sandbox.open-metadata.org' };
     return fetchJSON<{ om_base_url: string }>('/config');
