@@ -24,7 +24,10 @@ async function checkDemoMode(): Promise<boolean> {
     const timer = setTimeout(() => controller.abort(), 3000);
     const resp = await fetch(`${BASE}/health`, { signal: controller.signal });
     clearTimeout(timer);
-    _demoMode = !resp.ok;
+    // Vercel SPA fallback serves index.html (200 + text/html) for unknown routes.
+    // A real backend returns JSON, so check content-type to distinguish.
+    const ct = resp.headers.get('content-type') ?? '';
+    _demoMode = !resp.ok || !ct.includes('application/json');
   } catch {
     _demoMode = true;
   }
