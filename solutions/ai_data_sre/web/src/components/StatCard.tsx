@@ -1,5 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { TrendingDown, TrendingUp, X } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { Info, TrendingDown, TrendingUp, X } from 'lucide-react';
 import { Sparkline } from './Sparkline';
 import { SEVERITY_CONFIG, DEFAULT_SEVERITY_CONFIG } from '../data/constants';
 import type { IncidentSummary } from '../types';
@@ -117,6 +117,53 @@ function CardModal({ label, items, showRecurring, onClose }: ModalProps) {
   );
 }
 
+/* ── Info Tooltip ───────────────────────────────────────────────────────── */
+
+function InfoTooltip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleEnter = () => {
+    clearTimeout(timeoutRef.current);
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    }
+    setShow(true);
+  };
+  const handleLeave = () => {
+    timeoutRef.current = setTimeout(() => setShow(false), 150);
+  };
+
+  return (
+    <div onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="flex items-center justify-center w-5 h-5 rounded-full text-content-faint hover:text-content-muted hover:bg-surface-soft transition-colors"
+        aria-label="Info"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Info className="w-3.5 h-3.5" />
+      </button>
+      {show && pos && (
+        <div
+          className="fixed z-[9999] w-56 px-3 py-2.5 rounded-xl border border-border-subtle bg-surface-elevated shadow-2xl animate-fade-in"
+          style={{ top: pos.top, right: pos.right }}
+          onMouseEnter={handleEnter}
+          onMouseLeave={handleLeave}
+        >
+          <p className="text-[11px] text-content-secondary leading-relaxed">{text}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export { InfoTooltip };
+
 /* ── StatCard ──────────────────────────────────────────────────────────── */
 
 interface StatCardProps {
@@ -126,6 +173,8 @@ interface StatCardProps {
   delta?: { value: number; label: string };
   invertDelta?: boolean;
   subtitle?: string;
+  /** Tooltip text shown on hover of the info icon */
+  tooltip?: string;
   /** Incidents to show in the mini-list within the card */
   items?: IncidentSummary[];
   /** Show recurring badges in the list */
@@ -142,6 +191,7 @@ export function StatCard({
   delta,
   invertDelta = false,
   subtitle,
+  tooltip,
   items,
   showRecurring,
   sparkData,
@@ -169,19 +219,22 @@ export function StatCard({
         <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none" />
 
         <div className="relative z-10 flex-shrink-0">
-          {/* Top row: icon + delta */}
+          {/* Top row: icon + delta + info */}
           <div className="flex items-center justify-between mb-1.5">
             <span className={`flex items-center justify-center w-7 h-7 rounded-lg bg-surface-soft border border-border-subtle ${accentColor}`}>
               {icon}
             </span>
-            {delta && (
-              <span className={`flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                isGood ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
-              }`}>
-                {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-                {isPositive ? '+' : ''}{delta.value}%
-              </span>
-            )}
+            <div className="flex items-center gap-1.5">
+              {delta && (
+                <span className={`flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                  isGood ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+                }`}>
+                  {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                  {isPositive ? '+' : ''}{delta.value}%
+                </span>
+              )}
+              {tooltip && <InfoTooltip text={tooltip} />}
+            </div>
           </div>
 
           {/* Label + Value inline */}

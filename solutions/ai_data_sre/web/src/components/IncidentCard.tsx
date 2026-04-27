@@ -3,7 +3,9 @@ import {
   ChevronRight,
   Clock,
   Database,
+  Loader2,
   RefreshCw,
+  Sparkles,
   User,
 } from 'lucide-react';
 import type { IncidentSummary } from '../types';
@@ -44,6 +46,18 @@ export function IncidentCard({ incident, onClick }: IncidentCardProps) {
               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-warning bg-warning/10 border border-warning/20 rounded-full">
                 <RefreshCw className="w-3 h-3" />
                 Recurring
+              </span>
+            )}
+            {incident.report_generating && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-primary-400 bg-primary-500/10 border border-primary-500/20 rounded-full">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                AI Report
+              </span>
+            )}
+            {incident.has_report && !incident.report_generating && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                <Sparkles className="w-3 h-3" />
+                Report
               </span>
             )}
           </div>

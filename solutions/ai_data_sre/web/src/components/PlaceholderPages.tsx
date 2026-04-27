@@ -1,4 +1,4 @@
-import { GitBranch, FileText, Settings } from 'lucide-react';
+import { GitBranch, Settings } from 'lucide-react';
 
 function PlaceholderPage({
   icon,
@@ -26,16 +26,6 @@ export function LineagePage() {
       icon={<GitBranch className="w-8 h-8 text-primary-400" />}
       title="Lineage Explorer"
       description="Full lineage graph coming soon. Run the pipeline and click into an incident to see blast radius lineage."
-    />
-  );
-}
-
-export function ReportsPage() {
-  return (
-    <PlaceholderPage
-      icon={<FileText className="w-8 h-8 text-primary-400" />}
-      title="Reports"
-      description="AI-generated incident reports are available inside each incident detail view."
     />
   );
 }

@@ -1,5 +1,6 @@
 import {
   Bell,
+  Info,
   Play,
   RefreshCw,
   Search,
@@ -51,23 +52,36 @@ export function HeaderBar({
               <span className="hidden sm:inline">Refresh</span>
             </button>
           )}
-          <button
-            onClick={onRunPipeline}
-            disabled={loading}
-            className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-gradient-cta rounded-xl shadow-glow hover:shadow-glow-strong transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span className="hidden sm:inline">{pipelinePhase ?? 'Running…'}</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Run Pipeline
-              </>
+          <div className="relative group">
+            <button
+              onClick={onRunPipeline}
+              disabled={loading}
+              className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-gradient-cta rounded-xl shadow-glow hover:shadow-glow-strong transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span className="hidden sm:inline">{pipelinePhase ?? 'Running…'}</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4" />
+                  Run Pipeline
+                </>
+              )}
+            </button>
+            {!loading && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2.5 w-72 px-3.5 py-2.5 rounded-xl bg-surface-elevated border border-primary-500/30 shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-200 z-50">
+                <div className="absolute -top-[5px] left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-surface-elevated border-l border-t border-primary-500/30 rotate-45" />
+                <div className="flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 text-primary-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed text-content-secondary">
+                    In production, <span className="text-primary-400 font-semibold">Airflow</span> would trigger this pipeline every 30 minutes automatically, so incidents are detected without human intervention.
+                  </p>
+                </div>
+              </div>
             )}
-          </button>
+          </div>
         </div>
 
         {/* Right: utilities */}

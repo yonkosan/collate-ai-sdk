@@ -61,12 +61,15 @@ export const mockIncidentSummary: IncidentSummary = {
   failure_count: 2,
   blast_radius_size: 3,
   root_cause_table: 'supply_chain.raw_orders',
+  root_cause_column: 'order_id',
+  failing_columns: ['order_id'],
   assigned_to: null,
   acknowledged_by: null,
   resolved_by: null,
   slack_thread_url: null,
   created_at: '2026-04-25T10:00:00Z',
   has_report: true,
+    report_generating: false,
   has_recurring_failures: false,
 };
 
@@ -79,6 +82,7 @@ export const mockIncidentDetail: IncidentDetail = {
   failure_histories: [],
   blast_radius: mockBlastRadius,
   report: mockReport,
+  report_generating: false,
   assigned_to: null,
   acknowledged_by: null,
   resolved_by: null,
