@@ -170,6 +170,7 @@ class Incident(BaseModel):
     events: List[IncidentEvent] = Field(default_factory=list)
     slack_thread_ts: Optional[str] = None
     slack_thread_url: Optional[str] = None
+    report_generating: bool = False  # True while AI report is being generated in background
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

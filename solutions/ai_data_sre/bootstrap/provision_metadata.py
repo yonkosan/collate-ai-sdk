@@ -334,6 +334,48 @@ TEST_CASES: list[dict] = [
             "Root cause: raw_orders.order_date contains future dates."
         ),
     },
+    {
+        "name": "raw_suppliers_reliability_not_null",
+        "table": "raw_suppliers",
+        "column": "reliability_score",
+        "testDefinition": "columnValuesToBeNotNull",
+        "params": [],
+        "should_fail": True,
+        "fail_message": (
+            "Found 3 rows with NULL reliability_score. "
+            "Supplier records missing reliability data corrupt downstream "
+            "supply chain analytics and risk scoring."
+        ),
+    },
+    {
+        "name": "fact_supply_chain_grade_valid",
+        "table": "fact_supply_chain",
+        "column": "reliability_grade",
+        "testDefinition": "columnValuesToBeInSet",
+        "params": [
+            {"name": "allowedValues", "value": "[\"A\",\"B\",\"C\",\"D\"]"},
+        ],
+        "should_fail": True,
+        "fail_message": (
+            "Found rows with reliability_grade = 'F' (invalid grade). "
+            "Caused by upstream raw_suppliers.reliability_score containing NULL values "
+            "that bypass the grading CASE statement."
+        ),
+    },
+    {
+        "name": "raw_products_cost_price_positive",
+        "table": "raw_products",
+        "column": "cost_price",
+        "testDefinition": "columnValuesToBeBetween",
+        "params": [
+            {"name": "minValue", "value": "0"},
+        ],
+        "should_fail": True,
+        "fail_message": (
+            "Found 5 products with negative cost_price (min: -498.73). "
+            "Negative costs propagate incorrect margins into order analytics."
+        ),
+    },
 ]
 
 
@@ -972,6 +1014,9 @@ class MetadataProvisioner:
             "staging_orders_total_price_positive":   ["Success"] * 4 + ["Failed"] * 4,
             "fact_order_metrics_revenue_not_null":    ["Success"] * 8,
             "exec_kpis_revenue_reasonable":          ["Success"] * 5 + ["Failed"] * 3,
+            "raw_suppliers_reliability_not_null":    ["Success"] * 6 + ["Failed"] * 2,
+            "fact_supply_chain_grade_valid":         ["Success"] * 6 + ["Failed"] * 2,
+            "raw_products_cost_price_positive":      ["Success"] * 5 + ["Failed"] * 3,
         }
 
         for tc in TEST_CASES:

@@ -56,6 +56,8 @@ SUPPLIER_NAMES = [
 
 NUM_ORDERS = 7000
 NUM_FUTURE_ORDERS = 847  # ~12% — the hidden fault
+NUM_NULL_SUPPLIERS = 3  # suppliers with NULL reliability_score — fault #2
+NUM_NEGATIVE_PRODUCTS = 5  # products with negative cost_price — fault #3
 TODAY = date(2026, 4, 23)
 
 
@@ -114,7 +116,7 @@ def _create_tables(cur: pymysql.cursors.Cursor) -> None:
             supplier_name VARCHAR(200) NOT NULL,
             country       VARCHAR(100) NOT NULL,
             lead_time_days INT NOT NULL,
-            reliability_score DECIMAL(3,2) NOT NULL
+            reliability_score DECIMAL(3,2)
         )
     """)
 
@@ -198,30 +200,40 @@ def _create_tables(cur: pymysql.cursors.Cursor) -> None:
 
 
 def _insert_suppliers(cur: pymysql.cursors.Cursor) -> None:
-    """Insert supplier data."""
-    console.print("[bold]3/9[/] Inserting suppliers…")
+    """Insert supplier data — some with NULL reliability_score (fault #2)."""
+    console.print("[bold]3/9[/] Inserting suppliers (with hidden fault)…")
     rows = []
     for i, name in enumerate(SUPPLIER_NAMES, start=1):
         country = COUNTRIES[i % len(COUNTRIES)]
         lead_time = random.randint(3, 45)
-        reliability = round(random.uniform(0.55, 0.99), 2)
+        if i <= NUM_NULL_SUPPLIERS:
+            reliability = None  # HIDDEN FAULT #2
+        else:
+            reliability = round(random.uniform(0.55, 0.99), 2)
         rows.append((i, name, country, lead_time, reliability))
 
     cur.executemany(
         "INSERT IGNORE INTO raw_suppliers VALUES (%s, %s, %s, %s, %s)",
         rows,
     )
-    console.print(f"  ✓ {len(rows)} suppliers")
+    null_count = sum(1 for r in rows if r[4] is None)
+    console.print(
+        f"  ✓ {len(rows)} suppliers "
+        f"([red]{null_count} have NULL reliability_score — HIDDEN FAULT[/])"
+    )
 
 
 def _insert_products(cur: pymysql.cursors.Cursor) -> None:
-    """Insert product data."""
+    """Insert product data — some with negative cost_price (fault #3)."""
     console.print("[bold]4/9[/] Inserting products…")
     rows = []
     for i, name in enumerate(PRODUCT_NAMES, start=1):
         category = CATEGORIES[i % len(CATEGORIES)]
         supplier_id = (i % len(SUPPLIER_NAMES)) + 1
-        cost_price = round(random.uniform(5.0, 500.0), 2)
+        if i <= NUM_NEGATIVE_PRODUCTS:
+            cost_price = round(-random.uniform(50.0, 500.0), 2)  # HIDDEN FAULT #3
+        else:
+            cost_price = round(random.uniform(5.0, 500.0), 2)
         sku = f"SKU-{i:04d}"
         rows.append((i, name, category, supplier_id, cost_price, sku))
 
@@ -229,7 +241,11 @@ def _insert_products(cur: pymysql.cursors.Cursor) -> None:
         "INSERT IGNORE INTO raw_products VALUES (%s, %s, %s, %s, %s, %s)",
         rows,
     )
-    console.print(f"  ✓ {len(rows)} products")
+    neg_count = sum(1 for r in rows if r[4] < 0)
+    console.print(
+        f"  ✓ {len(rows)} products "
+        f"([red]{neg_count} have negative cost_price — HIDDEN FAULT[/])"
+    )
 
 
 def _insert_orders(cur: pymysql.cursors.Cursor) -> list[tuple]:
@@ -388,8 +404,8 @@ def _print_summary(cur: pymysql.cursors.Cursor) -> None:
     table.add_column("Notes", style="yellow")
 
     for tbl, note in [
-        ("raw_suppliers", ""),
-        ("raw_products", ""),
+        ("raw_suppliers", f"{NUM_NULL_SUPPLIERS} NULL reliability_score (FAULT)"),
+        ("raw_products", f"{NUM_NEGATIVE_PRODUCTS} negative cost_price (FAULT)"),
         ("raw_orders", f"{NUM_FUTURE_ORDERS} future-dated (FAULT)"),
         ("staging_orders", "negative total_price propagated"),
         ("staging_suppliers", ""),

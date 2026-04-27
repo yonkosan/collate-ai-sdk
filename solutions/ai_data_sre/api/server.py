@@ -89,8 +89,6 @@ class ResolveRequest(BaseModel):
     resolved_by: str = "admin"
     resolution_category: str = ""
     skip_verification: bool = False
-    resolution_category: str = ""
-    skip_verification: bool = False
 
 
 class IncidentSummary(BaseModel):
@@ -101,12 +99,15 @@ class IncidentSummary(BaseModel):
     failure_count: int
     blast_radius_size: int
     root_cause_table: str
-    assigned_to: Optional[str]
-    acknowledged_by: Optional[str]
-    resolved_by: Optional[str]
-    slack_thread_url: Optional[str]
+    root_cause_column: Optional[str] = None
+    failing_columns: List[str] = []
+    assigned_to: Optional[str] = None
+    acknowledged_by: Optional[str] = None
+    resolved_by: Optional[str] = None
+    slack_thread_url: Optional[str] = None
     created_at: str
     has_report: bool
+    report_generating: bool
     has_recurring_failures: bool
 
 
@@ -120,6 +121,7 @@ class UserInfo(BaseModel):
 
 def _incident_to_summary(inc: Incident) -> IncidentSummary:
     br = inc.blast_radius
+    failing_cols = sorted({f.column for f in inc.failures if f.column})
     return IncidentSummary(
         id=inc.id,
         title=inc.title,
@@ -128,12 +130,15 @@ def _incident_to_summary(inc: Incident) -> IncidentSummary:
         failure_count=len(inc.failures),
         blast_radius_size=br.total_affected_assets if br else 0,
         root_cause_table=br.root_cause_table if br else "Unknown",
+        root_cause_column=br.root_cause_column if br else None,
+        failing_columns=failing_cols,
         assigned_to=inc.assigned_to,
         acknowledged_by=inc.acknowledged_by,
         resolved_by=inc.resolved_by,
         slack_thread_url=inc.slack_thread_url,
         created_at=inc.created_at.isoformat(),
         has_report=inc.report is not None,
+        report_generating=inc.report_generating,
         has_recurring_failures=any(h.is_recurring for h in inc.failure_histories),
     )
 
@@ -170,8 +175,13 @@ def run_pipeline():
 
 @app.get("/api/pipeline/stream")
 def stream_pipeline():
-    """SSE endpoint: streams pipeline phases and incidents as they're discovered."""
+    """SSE endpoint: streams pipeline phases and incidents as they're discovered.
+
+    AI report generation runs in the background — incidents appear immediately
+    on the dashboard, and reports populate when the user opens an incident.
+    """
     import json
+    import threading
 
     from core.config import DataPulseConfig
     from core.investigator import Investigator
@@ -182,14 +192,39 @@ def stream_pipeline():
     def _sse(event: str, data: str) -> str:
         return f"event: {event}\ndata: {data}\n\n"
 
+    def _background_narrate_and_notify(incidents_list, config):
+        """Run AI report generation + Slack in a background thread."""
+        narrator = Narrator(config)
+        slack = _SlackNotifier(config)
+        try:
+            for inc in incidents_list:
+                try:
+                    narrator.narrate(inc)
+                    # Mark report as ready
+                    inc.report_generating = False
+                except Exception as exc:
+                    logger.warning("Background narration failed for %s: %s", inc.id, exc)
+                    inc.report_generating = False
+
+                # Slack notifications
+                try:
+                    thread_ts = slack.post_new_incident(inc)
+                    if thread_ts:
+                        inc.slack_thread_ts = thread_ts
+                        inc.slack_thread_url = slack.build_thread_url(thread_ts)
+                        slack.post_ai_report(inc)
+                except Exception as exc:
+                    logger.warning("Slack notification failed for %s: %s", inc.id, exc)
+        except Exception:
+            logger.exception("Background narrate/notify thread error")
+
     def generate():
         config = DataPulseConfig.from_env()
         sentinel = Sentinel(config)
         investigator = Investigator(config)
-        narrator = Narrator(config)
-        slack = _SlackNotifier(config)
 
         try:
+            _incidents.clear()
             yield _sse("phase", "Scanning for data quality failures…")
             incidents = sentinel.scan()
 
@@ -202,33 +237,29 @@ def stream_pipeline():
 
             # Emit each incident as soon as it's detected
             for inc in incidents:
+                inc.report_generating = True  # Flag: report not yet ready
                 _incidents[inc.id] = inc
                 yield _sse("incident", json.dumps(_incident_to_summary(inc).model_dump()))
 
-            # Phase 2: Investigate each incident
+            # Phase 2: Investigate each incident (fast — blast radius)
             for i, inc in enumerate(incidents, 1):
                 yield _sse("phase", f"Investigating root cause ({i}/{len(incidents)})…")
+                inc.transition(IncidentStatus.INVESTIGATING)
                 investigator.investigate(inc)
+                inc.transition(IncidentStatus.REPORTED)
                 yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
 
-            # Phase 3: Narrate
-            for i, inc in enumerate(incidents, 1):
-                yield _sse("phase", f"Generating AI report ({i}/{len(incidents)})…")
-                narrator.narrate(inc)
-                yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
-
-            # Phase 4: Slack
-            yield _sse("phase", "Sending Slack notifications…")
-            for inc in incidents:
-                thread_ts = slack.post_new_incident(inc)
-                if thread_ts:
-                    inc.slack_thread_ts = thread_ts
-                    inc.slack_thread_url = slack.build_thread_url(thread_ts)
-                    slack.post_ai_report(inc)
-                yield _sse("update", json.dumps(_incident_to_summary(inc).model_dump()))
-
-            yield _sse("phase", "Pipeline complete!")
+            # Pipeline is "done" from the user's perspective — incidents are on screen
+            yield _sse("phase", "Pipeline complete! AI reports generating in background…")
             yield _sse("done", "{}")
+
+            # Phase 3 + 4: Narrate + Slack in background thread
+            bg_thread = threading.Thread(
+                target=_background_narrate_and_notify,
+                args=(incidents, config),
+                daemon=True,
+            )
+            bg_thread.start()
 
         except Exception as exc:
             logger.exception("SSE pipeline error")
@@ -337,6 +368,12 @@ def resolve_incident(incident_id: str, body: ResolveRequest):
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
 
+    # Auto-advance status so RESOLVED transition is valid from any state
+    if inc.status == IncidentStatus.DETECTED:
+        inc.transition(IncidentStatus.INVESTIGATING)
+    if inc.status == IncidentStatus.INVESTIGATING:
+        inc.transition(IncidentStatus.REPORTED)
+
     inc.add_event("resolve_attempted", actor=body.resolved_by, detail=body.resolution_note[:200])
 
     # Skip verification path (force resolve)
@@ -424,11 +461,193 @@ def verify_incident(incident_id: str):
     result = verifier.verify_resolution(inc, "", skip_note_validation=True)
 
     return {
-        "passed": result.passed,
-        "message": result.message,
+        "passed": result.verified,
+        "message": result.latest_error or "All tests passing",
         "still_failing_tests": result.still_failing_tests,
-        "verified_at": result.verified_at,
+        "verified_at": result.checked_at.isoformat(),
     }
+
+
+# ─── In-platform DQ Fix endpoints ──────────────────────────────────────
+
+
+class ExecuteFixRequest(BaseModel):
+    sql: str
+
+
+class RerunTestRequest(BaseModel):
+    test_case_id: str
+    test_case_name: str
+
+
+@app.post("/api/incidents/{incident_id}/suggest-fix")
+def suggest_fix(incident_id: str):
+    """Generate AI-powered SQL fix suggestions for each failure in an incident."""
+    from core.fixer import Fixer
+
+    inc = _incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    fixer = Fixer(_get_config())
+    try:
+        suggestions = fixer.suggest_fix(inc)
+        data_fixes = [s for s in suggestions if s.fix_type == "data_fix"]
+        guardrails = [s for s in suggestions if s.fix_type == "guardrail"]
+        inc.add_event(
+            "fix_suggested",
+            actor="ai",
+            detail=f"{len(data_fixes)} data fix(es) + {len(guardrails)} guardrail(s) generated",
+        )
+        return {
+            "incident_id": incident_id,
+            "suggestions": [
+                {
+                    "test_case_name": s.test_case_name,
+                    "description": s.description,
+                    "sql": s.sql,
+                    "impact_summary": s.impact_summary,
+                    "risk_level": s.risk_level,
+                    "rows_affected_estimate": s.rows_affected_estimate,
+                    "fix_type": s.fix_type,
+                    "test_definition": s.test_definition,
+                    "entity_link": s.entity_link,
+                    "parameter_values": s.parameter_values,
+                }
+                for s in suggestions
+            ],
+        }
+    finally:
+        fixer.close()
+
+
+@app.post("/api/incidents/{incident_id}/execute-fix")
+def execute_fix(incident_id: str, body: ExecuteFixRequest):
+    """Execute a SQL fix against the database (UPDATE/DELETE only)."""
+    from core.fixer import Fixer
+
+    inc = _incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    fixer = Fixer(_get_config())
+    try:
+        result = fixer.execute_fix(body.sql)
+        if result.success:
+            inc.add_event("fix_applied", actor="admin", detail=result.message)
+            slack = _get_slack()
+            slack.post_thread_message(
+                inc,
+                f"🔧 *Fix Applied*\n```{result.executed_sql}```\n{result.message}",
+            )
+            # Sync fix status to OM incident
+            _push_om_incident_status(inc, "Assigned", "admin")
+        else:
+            inc.add_event("fix_failed", actor="admin", detail=result.message)
+
+        return {
+            "success": result.success,
+            "message": result.message,
+            "rows_affected": result.rows_affected,
+            "executed_sql": result.executed_sql,
+            "executed_at": result.executed_at,
+        }
+    finally:
+        fixer.close()
+
+
+@app.post("/api/incidents/{incident_id}/rerun-test")
+def rerun_test(incident_id: str, body: RerunTestRequest):
+    """Re-run a single DQ test case against the database and post result to OM."""
+    from core.fixer import Fixer
+
+    inc = _incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    fixer = Fixer(_get_config())
+    try:
+        result = fixer.rerun_test(body.test_case_id, body.test_case_name)
+        inc.add_event(
+            "test_rerun",
+            actor="admin",
+            detail=f"{result.test_case_name}: {result.status} — {result.message}",
+        )
+
+        # If test now passes, also update the failure entry
+        if result.status == "Success":
+            for f in inc.failures:
+                if f.test_case_id == body.test_case_id:
+                    f.result_message = result.message
+                    break
+
+        # Notify Slack of rerun result
+        status_emoji = "✅" if result.status == "Success" else "❌"
+        slack = _get_slack()
+        slack.post_thread_message(
+            inc,
+            f"{status_emoji} *Test Re-run*: `{result.test_case_name}` — {result.status}\n{result.message}",
+        )
+
+        return {
+            "test_case_name": result.test_case_name,
+            "status": result.status,
+            "message": result.message,
+            "timestamp": result.timestamp,
+        }
+    finally:
+        fixer.close()
+
+
+class AddGuardrailRequest(BaseModel):
+    name: str
+    test_definition: str
+    entity_link: str
+    parameter_values: list = []
+    description: str = ""
+
+
+@app.post("/api/incidents/{incident_id}/add-guardrail")
+def add_guardrail(incident_id: str, body: AddGuardrailRequest):
+    """Create a DQ test case in OpenMetadata as a guardrail against recurrence."""
+    from core.fixer import Fixer
+
+    inc = _incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    fixer = Fixer(_get_config())
+    try:
+        result = fixer.create_guardrail(
+            name=body.name,
+            test_definition=body.test_definition,
+            entity_link=body.entity_link,
+            parameter_values=body.parameter_values,
+            description=body.description,
+        )
+
+        if result.success:
+            inc.add_event(
+                "guardrail_added",
+                actor="admin",
+                detail=f"OM test '{result.test_case_name}' created — {body.test_definition}",
+            )
+            slack = _get_slack()
+            slack.post_thread_message(
+                inc,
+                f"🛡️ *Guardrail Added*\nTest `{result.test_case_name}` ({body.test_definition}) created in OpenMetadata.",
+            )
+
+        return {
+            "success": result.success,
+            "message": result.message,
+            "test_case_name": result.test_case_name,
+            "test_case_id": result.test_case_id,
+            "om_link": result.om_link,
+            "created_at": result.created_at,
+        }
+    finally:
+        fixer.close()
 
 
 @app.get("/api/users", response_model=List[UserInfo])

@@ -266,46 +266,10 @@ class SlackNotifier:
 
         self._post_reply(incident.slack_thread_ts, text)
 
-    def post_resolution_summary(self, incident: Incident) -> None:
-        """Post a final summary card when an incident is resolved."""
+    def post_thread_message(self, incident: Incident, text: str) -> None:
+        """Post an arbitrary message to an incident's Slack thread."""
         if not self._enabled or not incident.slack_thread_ts:
             return
-        if not incident.resolved_at or not incident.created_at:
-            return
-
-        ttr_seconds = (incident.resolved_at - incident.created_at).total_seconds()
-        if ttr_seconds < 3600:
-            ttr = f"{int(ttr_seconds / 60)}m"
-        elif ttr_seconds < 86400:
-            ttr = f"{ttr_seconds / 3600:.1f}h"
-        else:
-            ttr = f"{ttr_seconds / 86400:.1f}d"
-
-        actors = set()
-        if incident.acknowledged_by:
-            actors.add(incident.acknowledged_by)
-        if incident.assigned_to:
-            actors.add(incident.assigned_to)
-        if incident.resolved_by:
-            actors.add(incident.resolved_by)
-
-        confidence_line = ""
-        if incident.verification and incident.verification.confidence:
-            confidence_line = f"\n*Verification:* {incident.verification.confidence}"
-
-        category_line = ""
-        if incident.root_cause_category:
-            category_line = f"\n*Root Cause Category:* {incident.root_cause_category}"
-
-        text = (
-            f"📋 *Incident Summary*\n"
-            f"*Time to Resolution:* {ttr}\n"
-            f"*Involved:* {', '.join(sorted(actors)) or 'N/A'}"
-            f"{confidence_line}"
-            f"{category_line}\n"
-            f"*Resolution:* _{incident.resolution_note}_"
-        )
-
         self._post_reply(incident.slack_thread_ts, text)
 
     def _post_message(self, text: str, blocks: list) -> Optional[str]:

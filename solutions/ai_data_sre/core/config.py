@@ -63,7 +63,9 @@ class DataPulseConfig:
         if env_file is not None and env_file.exists():
             load_dotenv(env_file)
         else:
-            load_dotenv()
+            # Resolve .env relative to this file's directory (project root)
+            project_env = Path(__file__).resolve().parent.parent / ".env"
+            load_dotenv(project_env)
 
         om_host = os.environ.get("OPENMETADATA_HOST", "http://localhost:8585")
         om_token = os.environ.get("OPENMETADATA_TOKEN", _DEFAULT_JWT)
