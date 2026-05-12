@@ -87,7 +87,7 @@ DataPulse doesn't just run a pipeline and dump results — it **streams every ph
 - AI reports generate asynchronously in background threads — the UI polls and reveals them when ready
 
 <p align="center">
-  <img src="docs/screenshots/03-incidents-detected.png" alt="Incidents detected after pipeline" width="90%" />
+  <img src="docs/screenshots/01-dashboard.png" alt="Incidents detected after pipeline" width="90%" />
   <br />
   <em>Incidents detected and grouped by severity — each card shows failure count, blast radius, root cause table, and assigned owner</em>
 </p>
@@ -111,7 +111,7 @@ The dashboard KPI cards don't just count failures — they surface the insight t
 Click any incident to open the full investigation view — everything you need to understand, triage, and fix the issue in one screen:
 
 <p align="center">
-  <img src="docs/screenshots/04-incident-detail.png" alt="Incident detail panel" width="90%" />
+  <img src="docs/screenshots/02-pipeline-running.png" alt="Incident detail panel" width="90%" />
   <br />
   <em>Full incident detail — severity badge, action bar, AI report, affected assets, failure history, and event timeline</em>
 </p>
@@ -182,7 +182,7 @@ Reports generate asynchronously — the UI shows a loading skeleton while GPT-4o
 The crown jewel of DataPulse: a **4-step guided wizard** that takes you from root cause analysis to verified resolution without leaving the UI:
 
 <p align="center">
-  <img src="docs/screenshots/07-fix-suggestions.png" alt="Fix suggestions wizard" width="90%" />
+  <img src="docs/screenshots/03-incidents-detected.png" alt="Fix suggestions wizard" width="90%" />
   <br />
   <em>AI-generated fix suggestions — root cause fixes (recommended) and symptom fixes (temporary), with editable SQL and risk levels</em>
 </p>
